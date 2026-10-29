@@ -5,6 +5,7 @@ import { CarStatus, type Prisma, type FuelType, type Transmission } from "@prism
 import { BLOCKING_STATUSES, getActiveDiscountMap } from "@/lib/bookings";
 import { rangesOverlap } from "@/lib/pricing";
 import { CarCard } from "@/components/car-card";
+import { CarsMap } from "@/components/cars-map";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -59,6 +60,12 @@ export default async function CarsPage({ searchParams }: { searchParams: Promise
   const slice = results.slice((clamped - 1) * PAGE_SIZE, clamped * PAGE_SIZE);
   // ONE extra query for the whole page of cards (anti-N+1): carId -> live percent.
   const discountMap = await getActiveDiscountMap(slice.map((c) => c.id));
+
+  // Map search data: slim objects for ALL filtered cars (not just this page), capped for performance.
+  const mapCars = results.slice(0, 200).map((c) => ({
+    id: c.id, make: c.make, model: c.model, year: c.year, pricePerDay: c.pricePerDay,
+    neighbourhood: c.neighbourhood, lat: c.lat, lng: c.lng, photo: c.photos[0] ?? null,
+  }));
 
   const neighbourhoods = [...new Set((await db.car.findMany({ where: { status: CarStatus.APPROVED }, select: { neighbourhood: true } })).map((c) => c.neighbourhood))].sort();
   const qs = (over: Partial<Params>) => { const p = new URLSearchParams({ ...sp, ...Object.fromEntries(Object.entries(over).filter(([, v]) => v !== undefined && v !== "")) } as Record<string, string>); p.set("page", "1"); return "/cars?" + p.toString(); };
@@ -155,31 +162,38 @@ export default async function CarsPage({ searchParams }: { searchParams: Promise
             </div>
           </div>
 
-          {slice.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-10 text-center">
-              <SearchX className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" aria-hidden />
-              <p className="font-medium">No cars match your filters</p>
-              <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">Try widening the price range, choosing another neighbourhood, or clearing the availability dates.</p>
-              <Button asChild variant="outline" size="sm" className="mt-4"><Link href="/cars">Clear all filters</Link></Button>
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {slice.map((car) => {
-                const ratings = car.reviews.map((r) => r.rating);
-                return <CarCard key={car.id} car={{ ...car, avgRating: ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null, reviewsCount: ratings.length, discountPercent: discountMap.get(car.id) ?? null }} />;
-              })}
-            </div>
-          )}
+          <CarsMap
+            cars={mapCars}
+            listSlot={
+              <>
+                {slice.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-10 text-center">
+                    <SearchX className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" aria-hidden />
+                    <p className="font-medium">No cars match your filters</p>
+                    <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">Try widening the price range, choosing another neighbourhood, or clearing the availability dates.</p>
+                    <Button asChild variant="outline" size="sm" className="mt-4"><Link href="/cars">Clear all filters</Link></Button>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {slice.map((car) => {
+                      const ratings = car.reviews.map((r) => r.rating);
+                      return <CarCard key={car.id} car={{ ...car, avgRating: ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null, reviewsCount: ratings.length, discountPercent: discountMap.get(car.id) ?? null }} />;
+                    })}
+                  </div>
+                )}
 
-          {pages > 1 && (
-            <nav aria-label="Pagination" className="flex items-center justify-center gap-1 pt-2">
-              {Array.from({ length: pages }, (_, i) => i + 1).map((p) => (
-                <Button key={p} asChild size="sm" variant={p === clamped ? "secondary" : "ghost"} aria-current={p === clamped ? "page" : undefined}>
-                  <Link href={pageQs(p)}>{p}</Link>
-                </Button>
-              ))}
-            </nav>
-          )}
+                {pages > 1 && (
+                  <nav aria-label="Pagination" className="flex items-center justify-center gap-1 pt-2">
+                    {Array.from({ length: pages }, (_, i) => i + 1).map((p) => (
+                      <Button key={p} asChild size="sm" variant={p === clamped ? "secondary" : "ghost"} aria-current={p === clamped ? "page" : undefined}>
+                        <Link href={pageQs(p)}>{p}</Link>
+                      </Button>
+                    ))}
+                  </nav>
+                )}
+              </>
+            }
+          />
         </div>
       </div>
     </div>
