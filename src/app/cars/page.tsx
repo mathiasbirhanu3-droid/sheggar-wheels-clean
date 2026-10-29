@@ -6,10 +6,9 @@ import { BLOCKING_STATUSES, getActiveDiscountMap } from "@/lib/bookings";
 import { rangesOverlap } from "@/lib/pricing";
 import { CarCard } from "@/components/car-card";
 import { CarsMap } from "@/components/cars-map";
-import { Input } from "@/components/ui/input";
+import { CarsFilterSidebar } from "@/components/cars-filter-sidebar";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { SearchX, SlidersHorizontal } from "lucide-react";
+import { SearchX } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Browse cars" };
@@ -80,74 +79,8 @@ export default async function CarsPage({ searchParams }: { searchParams: Promise
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        {/* Filters */}
-        <form action="/cars" method="get" className="space-y-4 self-start rounded-xl border p-4 lg:sticky lg:top-20">
-          <input type="hidden" name="sort" value={sort} />
-          <p className="flex items-center gap-2 font-semibold"><SlidersHorizontal className="h-4 w-4" /> Filters</p>
-          <div className="space-y-1.5">
-            <Label htmlFor="q">Search</Label>
-            <Input id="q" name="q" defaultValue={sp.q ?? ""} placeholder="Make, model, area…" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="neighbourhood">Neighbourhood</Label>
-            <select id="neighbourhood" name="neighbourhood" defaultValue={sp.neighbourhood ?? ""} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-              <option value="">Any area</option>
-              {neighbourhoods.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="transmission">Transmission</Label>
-            <select id="transmission" name="transmission" defaultValue={sp.transmission ?? ""} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-              <option value="">Any</option>
-              <option value="AUTOMATIC">Automatic</option>
-              <option value="MANUAL">Manual</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="fuelType">Fuel type</Label>
-            <select id="fuelType" name="fuelType" defaultValue={sp.fuelType ?? ""} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-              <option value="">Any</option>
-              <option value="PETROL">Petrol</option>
-              <option value="DIESEL">Diesel</option>
-              <option value="HYBRID">Hybrid</option>
-              <option value="ELECTRIC">Electric</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="seats">Minimum seats</Label>
-            <select id="seats" name="seats" defaultValue={sp.seats ?? ""} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-              <option value="">Any</option>
-              <option value="2">2+</option>
-              <option value="4">4+</option>
-              <option value="5">5+</option>
-              <option value="7">7+</option>
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="minPrice">Min ETB/day</Label>
-              <Input id="minPrice" name="minPrice" type="number" min={0} defaultValue={sp.minPrice ?? ""} placeholder="0" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="maxPrice">Max ETB/day</Label>
-              <Input id="maxPrice" name="maxPrice" type="number" min={0} defaultValue={sp.maxPrice ?? ""} placeholder="10000" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="start">Available from</Label>
-              <Input id="start" name="start" type="date" defaultValue={sp.start ?? ""} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="end">Until</Label>
-              <Input id="end" name="end" type="date" defaultValue={sp.end ?? ""} />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" className="flex-1 bg-brand text-brand-foreground hover:bg-brand/90">Apply</Button>
-            {active > 0 && <Button asChild type="button" variant="outline"><Link href="/cars" aria-label={`Clear ${active} active filters`}>Reset</Link></Button>}
-          </div>
-        </form>
+        {/* Filters — Airbnb/Turo/Booking-style sidebar, zero client JS */}
+        <CarsFilterSidebar sp={sp} neighbourhoods={neighbourhoods} active={active} total={total} sort={sort} />
 
         {/* Results */}
         <div className="space-y-4">
