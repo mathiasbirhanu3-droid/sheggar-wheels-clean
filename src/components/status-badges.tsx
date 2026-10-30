@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { BookingStatus, PaymentStatus, CarStatus, LicenseStatus, DriveMode, DrivingLicenseStatus } from "@prisma/client";
+import type { BookingStatus, PaymentStatus, CarStatus, LicenseStatus, DriveMode } from "@prisma/client";
 
 const BOOKING_STYLES: Record<BookingStatus, string> = {
   REQUESTED: "bg-amber-100 text-amber-800 hover:bg-amber-100",
@@ -44,9 +44,9 @@ export function CarStatusBadge({ status }: { status: CarStatus }) {
   return <Badge className={styles[status]} variant="secondary">{status.toLowerCase()}</Badge>;
 }
 
-// NOTE: the live database's LicenseStatus enum also carries a legacy NONE value
-// (used by the older user-profile licence feature). String-keyed lookup with
-// fallbacks renders ANY enum member without breaking the build in either schema shape.
+// Per-booking licence status — decided by the car OWNER together with the
+// booking (FR-49, Turo-style). String-keyed lookup with fallbacks renders ANY
+// enum member without breaking the build if the database enum drifts.
 export function LicenseStatusBadge({ status }: { status: LicenseStatus }) {
   const styles: Record<string, string> = {
     NONE: "bg-stone-200 text-stone-600 hover:bg-stone-200",
@@ -77,22 +77,4 @@ export function DriveModeBadge({ mode }: { mode: DriveMode }) {
     OWNER_DRIVER: "owner's driver",
   };
   return <Badge className={styles[mode]} variant="secondary">{labels[mode]}</Badge>;
-}
-
-// FR-50: the renter's PROFILE licence status (admin-decided, unlocks self-drive).
-// Distinct from the per-booking LicenseStatusBadge above (owner-decided).
-export function DrivingLicenseStatusBadge({ status }: { status: DrivingLicenseStatus }) {
-  const styles: Record<DrivingLicenseStatus, string> = {
-    NONE: "bg-stone-200 text-stone-600 hover:bg-stone-200",
-    PENDING: "bg-amber-100 text-amber-800 hover:bg-amber-100",
-    APPROVED: "bg-emerald-100 text-emerald-800 hover:bg-emerald-100",
-    REJECTED: "bg-red-100 text-red-800 hover:bg-red-100",
-  };
-  const labels: Record<DrivingLicenseStatus, string> = {
-    NONE: "not submitted",
-    PENDING: "pending admin review",
-    APPROVED: "approved by admin",
-    REJECTED: "rejected — re-upload",
-  };
-  return <Badge className={styles[status]} variant="secondary">{labels[status]}</Badge>;
 }

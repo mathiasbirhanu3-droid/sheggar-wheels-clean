@@ -56,11 +56,6 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
 
   if (!isPublic && !isOwner) notFound();
 
-  // FR-50: the signed-in renter's profile licence status drives the self-drive gate.
-  const licenseStatus = user
-    ? (await db.user.findUnique({ where: { id: user.id }, select: { drivingLicenseStatus: true } }))?.drivingLicenseStatus ?? "NONE"
-    : "NONE";
-
   const ratings = car.reviews.map((r) => r.rating);
   const avg = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null;
   // Live offer for this exact car — 0 when none. Drives the badge + the form's discount line.
@@ -229,7 +224,6 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
                 suspended={user?.status === "SUSPENDED"}
                 discountPercent={discountPercent}
                 driverFeePerDay={car.driverFeePerDay}
-                licenseStatus={licenseStatus}
               />
             </CardContent>
           </Card>

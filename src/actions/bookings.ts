@@ -9,6 +9,7 @@ import { assertTransition, findConflict, validateNewBooking, demoPaymentRef, can
 import { getPaymentMethod } from "@/lib/payments";
 import { notify, notifyAdmins } from "@/lib/notifications";
 import { bookingSchema, disputeSchema, paymentSchema, type ActionState } from "@/lib/validation";
+import { PAYMENT_TERMS_VERSION, RENTAL_TERMS_VERSION } from "@/lib/terms";
 import { rateLimit, scopedKey } from "@/lib/rate-limit";
 import { formatETB, formatDate } from "@/lib/pricing";
 import { Prisma, BookingStatus, DisputeStatus, PaymentStatus, LicenseStatus } from "@prisma/client";
@@ -27,11 +28,13 @@ function refresh(id: string) {
 }
 
 /** FR-17/18 + FR-49: create a request with a server-side price snapshot and the
- *  drive mode. Licence rules by mode:
- *  - SELF_DRIVE: the renter's profile licence must already be ADMIN-approved
- *    (the gate); its number/photo are snapshotted for the owner's handover.
+ *  drive mode. Every licence travels WITH the request (Turo-style) and the car
+ *  OWNER approves or rejects it together with the booking — no platform-admin
+ *  licence approval exists:
+ *  - SELF_DRIVE: the renter's own licence (number + photo) travels with the
+ *    request; status starts PENDING for the owner's review.
  *  - OWN_DRIVER: the brought driver's licence (number + photo) travels with the
- *    request and the OWNER reviews it (status PENDING).
+ *    request; status PENDING for the owner's review.
  *  - OWNER_DRIVER: the owner vouches for their own driver — no licence upload;
  *    the listing's daily driver fee joins the total and shares the 10% fee. */
 export async function requestBookingAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -49,14 +52,14 @@ export async function requestBookingAction(_prev: ActionState, formData: FormDat
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   const { driveMode } = parsed.data;
+  // FR-51 clickwrap gate (BR-11 spirit — never trust the UI): the request is
+  // only valid if the current rental-terms version was accepted in this very
+  // submission. The dialog sets both hidden inputs at confirm time.
+  if (formData.get("termsAgreed") !== "1" || formData.get("termsVersion") !== RENTAL_TERMS_VERSION) {
+    return { error: "Please accept the rental rules before requesting a booking." };
+  }
   const start = new Date(parsed.data.startDate + "T00:00:00.000Z");
   const end = new Date(parsed.data.endDate + "T00:00:00.000Z");
-
-  // Licence state BEFORE any price work — the self-drive gate is server-side (BR-11).
-  const me = await db.user.findUnique({
-    where: { id: user.id },
-    select: { drivingLicenseStatus: true, drivingLicenseNumber: true, drivingLicenseDoc: true },
-  });
 
   // Effective owner-driver fee: only when the renter picked OWNER_DRIVER.
   // The car row arrives from validateNewBooking; fetch the fee up front so the
@@ -66,21 +69,16 @@ export async function requestBookingAction(_prev: ActionState, formData: FormDat
   if (driveMode === "OWNER_DRIVER" && !ownerDriverFee) {
     return { error: "This owner does not offer a driver for this car — choose self-drive or bring your own driver." };
   }
-  if (driveMode === "SELF_DRIVE" && me?.drivingLicenseStatus !== "APPROVED") {
-    return { error: "Self-drive needs your driving licence approved by the platform admin. Upload it on your profile page, or book with a driver instead." };
-  }
 
   const result = await validateNewBooking(parsed.data.carId, start, end, undefined, ownerDriverFee);
   if ("error" in result && result.error) return { error: result.error };
   const car = result.car!;
 
-  // Licence snapshot per mode (see doc above).
+  // Licence snapshot per mode (see doc above) — the OWNER reviews it with the request.
   const licence =
-    driveMode === "SELF_DRIVE"
-      ? { licenseNumber: me!.drivingLicenseNumber, licenseImage: me!.drivingLicenseDoc, licenseStatus: LicenseStatus.APPROVED }
-      : driveMode === "OWN_DRIVER"
-        ? { licenseNumber: parsed.data.driverLicenseNumber!, licenseImage: parsed.data.driverLicenseImage!, licenseStatus: LicenseStatus.PENDING }
-        : { licenseNumber: null, licenseImage: null, licenseStatus: LicenseStatus.APPROVED }; // OWNER_DRIVER
+    driveMode === "OWNER_DRIVER"
+      ? { licenseNumber: null, licenseImage: null, licenseStatus: LicenseStatus.APPROVED } // owner vouches for their driver
+      : { licenseNumber: parsed.data.driverLicenseNumber!, licenseImage: parsed.data.driverLicenseImage!, licenseStatus: LicenseStatus.PENDING }; // SELF_DRIVE + OWN_DRIVER
 
   const booking = await db.booking.create({
     data: {
@@ -92,12 +90,14 @@ export async function requestBookingAction(_prev: ActionState, formData: FormDat
       driveMode, driverName: driveMode === "OWN_DRIVER" ? parsed.data.driverName! : null,
       driverFeePerDay: result.totals!.driverFeePerDay, driverTotal: result.totals!.driverTotal,
       fee: result.totals!.fee, total: result.totals!.total,
+      // FR-51: clickwrap proof stamped by the SERVER with the accepted version.
+      termsVersion: RENTAL_TERMS_VERSION, termsAgreedAt: new Date(),
       status: BookingStatus.REQUESTED, paymentStatus: PaymentStatus.UNPAID,
       ...licence,
     },
   });
   const modeLine =
-    driveMode === "SELF_DRIVE" ? "Self-drive — licence already verified by the platform admin."
+    driveMode === "SELF_DRIVE" ? "Self-drive — the renter's own driving licence is attached, review it before approving."
     : driveMode === "OWN_DRIVER" ? `Own driver (${parsed.data.driverName}) — driver's licence attached, review it before approving.`
     : "With your professional driver — no licence review needed.";
   await notify(car.ownerId, "New booking request", `${user.name} requested your ${car.make} ${car.model} for ${formatDate(start)} - ${formatDate(end)} (${formatETB(booking.total)}). ${modeLine}`, "/owner/cars/" + car.id + "/bookings");
@@ -107,7 +107,8 @@ export async function requestBookingAction(_prev: ActionState, formData: FormDat
 }
 
 /** FR-20: owner approves — transactional overlap re-check (BR-05).
- *  Approving the request also approves the submitted driving licence. */
+ *  Approving the request also approves the submitted driving licence
+ *  (the renter's own for SELF_DRIVE, the brought driver's for OWN_DRIVER). */
 export async function approveBookingAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requireActiveUser();
   const id = String(formData.get("bookingId") ?? "");
@@ -117,9 +118,9 @@ export async function approveBookingAction(_prev: ActionState, formData: FormDat
   const conflict = await findConflict(booking.carId, booking.startDate, booking.endDate, booking.id, HARD_HOLD_STATUSES);
   if (conflict) return { error: "Another confirmed booking already covers these dates — approval refused (BR-05)." };
   await db.booking.update({ where: { id }, data: { status: BookingStatus.CONFIRMED, licenseStatus: LicenseStatus.APPROVED } });
-  await notify(booking.renterId, "Booking confirmed", `Your ${booking.car.make} ${booking.car.model} trip from ${formatDate(booking.startDate)} is confirmed${booking.driveMode === "OWN_DRIVER" ? " — your driver's licence was approved" : ""}. Pick a payment method at checkout (TeleBirr, CBE Birr, M-Pesa or Chapa).`, "/bookings/" + id);
+  await notify(booking.renterId, "Booking confirmed", `Your ${booking.car.make} ${booking.car.model} trip from ${formatDate(booking.startDate)} is confirmed${booking.driveMode !== "OWNER_DRIVER" ? " — the submitted licence was approved" : ""}. Pick a payment method at checkout (TeleBirr, CBE Birr, M-Pesa or Chapa).`, "/bookings/" + id);
   refresh(id);
-  return { ok: true, message: booking.driveMode === "OWN_DRIVER" ? "Booking confirmed — driver's licence approved. The renter can now pay at checkout." : "Booking confirmed. The renter can now pay at checkout." };
+  return { ok: true, message: booking.driveMode !== "OWNER_DRIVER" ? "Booking confirmed — licence approved. The renter can now pay at checkout." : "Booking confirmed. The renter can now pay at checkout." };
 }
 
 /** FR-20: owner declines — the driving licence is rejected with it (optional reason). */
@@ -189,12 +190,16 @@ export async function payBookingAction(_prev: ActionState, formData: FormData): 
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   const method = getPaymentMethod(parsed.data.method);
   if (!method) return { error: "Choose a payment method." };
+  // FR-51 clickwrap gate: payment terms must be accepted in this submission.
+  if (formData.get("paymentTermsAgreed") !== "1" || formData.get("paymentTermsVersion") !== PAYMENT_TERMS_VERSION) {
+    return { error: "Please accept the payment & escrow terms before paying." };
+  }
   const booking = await getBooking(parsed.data.bookingId);
   if (!booking || booking.renterId !== user.id) return { error: "You are not allowed to pay for this booking." };
   if (booking.status !== BookingStatus.CONFIRMED) return { error: "Only a confirmed booking can be paid for." };
   if (booking.paymentStatus !== PaymentStatus.UNPAID) return { error: "This booking has already been paid." }; // idempotency guard
   const paymentRef = demoPaymentRef(method.refPrefix);
-  await db.booking.update({ where: { id: booking.id }, data: { paymentStatus: PaymentStatus.HELD, paymentRef, paymentMethod: method.label } });
+  await db.booking.update({ where: { id: booking.id }, data: { paymentStatus: PaymentStatus.HELD, paymentRef, paymentMethod: method.label, paymentTermsVersion: PAYMENT_TERMS_VERSION, paymentTermsAgreedAt: new Date() } });
   await notify(booking.ownerId, "Payment held in escrow", `${user.name} paid ${formatETB(booking.total)} via ${method.label} for the ${booking.car.make} ${booking.car.model}. It stays in escrow until the trip completes (Ref ${paymentRef}).`, "/bookings/" + booking.id);
   await notifyAdmins("Payment held in escrow", `${user.name} paid ${formatETB(booking.total)} via ${method.label} for ${booking.owner.name}'s ${booking.car.make} ${booking.car.model}. Ref ${paymentRef}.`, "/admin/bookings");
   refresh(booking.id);

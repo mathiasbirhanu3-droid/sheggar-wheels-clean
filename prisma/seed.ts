@@ -1,6 +1,6 @@
 // prisma/seed.ts — Sheggar Wheels demo dataset (SRS Chapter 5 "Data Requirements").
 // Idempotent: clears and re-creates. Run: bun prisma/seed.ts (with .env DATABASE_URL set).
-import { PrismaClient, Role, CarStatus, Transmission, FuelType, BookingStatus, PaymentStatus, DisputeStatus, UserStatus, DrivingLicenseStatus, DriveMode, LicenseStatus } from "@prisma/client";
+import { PrismaClient, Role, CarStatus, Transmission, FuelType, BookingStatus, PaymentStatus, DisputeStatus, UserStatus, DriveMode, LicenseStatus } from "@prisma/client";
 import { hashPassword } from "../src/lib/password";
 import { DEMO_ACCOUNT_PASSWORD } from "../src/lib/password-policy";
 
@@ -31,28 +31,18 @@ async function main() {
   // ── Users ────────────────────────────────────────────────────────────
   // Every seeded account gets the shared demo password (shown on /signin),
   // hashed per user so each row carries its own random scrypt salt.
-  const mkUser = (data: { email: string; name: string; phone: string; roles: Role[]; status?: UserStatus; drivingLicenseNumber?: string }) =>
+  const mkUser = (data: { email: string; name: string; phone: string; roles: Role[]; status?: UserStatus }) =>
     hashPassword(DEMO_ACCOUNT_PASSWORD).then((passwordHash) =>
-      db.user.create({
-        data: {
-          ...data,
-          passwordHash,
-          // FR-50: seeded renters arrive with an ADMIN-APPROVED licence so self-drive
-          // works out of the box (kalkidan stays NONE to demo the gate).
-          ...(data.drivingLicenseNumber
-            ? { drivingLicenseNumber: data.drivingLicenseNumber, drivingLicenseStatus: DrivingLicenseStatus.APPROVED }
-            : {}),
-        },
-      })
+      db.user.create({ data: { ...data, passwordHash } })
     );
   const admin = await mkUser({ email: "admin@sheggarwheels.et", name: "Demo Admin", phone: "+251 911 000 001", roles: [Role.ADMIN] });
   const daniel = await mkUser({ email: "daniel@sheggarwheels.et", name: "Daniel Bekele", phone: "+251 911 234 567", roles: [Role.OWNER] });
   const selam = await mkUser({ email: "selam@sheggarwheels.et", name: "Selam Tadesse", phone: "+251 911 345 678", roles: [Role.OWNER] });
   const aklilu = await mkUser({ email: "aklilu@sheggarwheels.et", name: "Aklilu Mengistu", phone: "+251 911 456 789", roles: [Role.OWNER] });
-  const yonas = await mkUser({ email: "yonas@sheggarwheels.et", name: "Yonas Girma", phone: "+251 912 111 222", roles: [Role.RENTER], drivingLicenseNumber: "ET-DL-221190" });
-  const hanna = await mkUser({ email: "hanna@sheggarwheels.et", name: "Hanna Alemu", phone: "+251 912 222 333", roles: [Role.RENTER], drivingLicenseNumber: "ET-DL-334450" });
-  const mert = await mkUser({ email: "mert@sheggarwheels.et", name: "Mert Kebede", phone: "+251 912 333 444", roles: [Role.RENTER], drivingLicenseNumber: "ET-DL-556780" });
-  const ruth = await mkUser({ email: "ruth@sheggarwheels.et", name: "Ruth Wolde", phone: "+251 912 444 555", roles: [Role.RENTER, Role.OWNER], drivingLicenseNumber: "ET-DL-667890" });
+  const yonas = await mkUser({ email: "yonas@sheggarwheels.et", name: "Yonas Girma", phone: "+251 912 111 222", roles: [Role.RENTER] });
+  const hanna = await mkUser({ email: "hanna@sheggarwheels.et", name: "Hanna Alemu", phone: "+251 912 222 333", roles: [Role.RENTER] });
+  const mert = await mkUser({ email: "mert@sheggarwheels.et", name: "Mert Kebede", phone: "+251 912 333 444", roles: [Role.RENTER] });
+  const ruth = await mkUser({ email: "ruth@sheggarwheels.et", name: "Ruth Wolde", phone: "+251 912 444 555", roles: [Role.RENTER, Role.OWNER] });
   await mkUser({ email: "kalkidan@sheggarwheels.et", name: "Kalkidan Assefa", phone: "+251 912 555 666", roles: [Role.RENTER], status: UserStatus.SUSPENDED });
 
   // ── Cars (Addis Ababa neighbourhoods; coords are seeded sample points, C7) ──
@@ -79,7 +69,7 @@ async function main() {
   const mk = async (
     car: { id: string; pricePerDay: number }, renterId: string, ownerId: string, s: string, e: string,
     status: BookingStatus, pay: PaymentStatus, withRef = false,
-    extra: { driveMode?: DriveMode; driverName?: string; driverFeePerDay?: number } = {}
+    extra: { driveMode?: DriveMode; driverName?: string; driverFeePerDay?: number; licenseNumber?: string } = {}
   ) => {
     const m = money(car.pricePerDay, s, e, extra.driverFeePerDay ?? 0);
     return db.booking.create({ data: {
@@ -89,27 +79,37 @@ async function main() {
       driveMode: extra.driveMode ?? DriveMode.SELF_DRIVE,
       ...(extra.driverName ? { driverName: extra.driverName } : {}),
       driverFeePerDay: extra.driverFeePerDay ?? 0, driverTotal: m.driverTotal,
-      // Licence semantics: OWN_DRIVER requests start PENDING (owner reviews the
-      // driver's licence); everything else is admin/owner-covered → APPROVED.
-      licenseStatus: extra.driveMode === DriveMode.OWN_DRIVER ? LicenseStatus.PENDING : LicenseStatus.APPROVED,
-      ...(extra.driveMode === DriveMode.OWN_DRIVER ? { licenseNumber: "ET-DM-778120" } : {}),
+      // Licence semantics (FR-49, Turo-style): every licence travels WITH the
+      // request and the OWNER decides it together with the booking. REQUESTED →
+      // still PENDING (owner reviewing); DECLINED → rejected with the booking;
+      // any later step → the licence passed. OWNER_DRIVER needs none (the owner
+      // vouches for their own driver).
+      ...(extra.driveMode === DriveMode.OWNER_DRIVER
+        ? { licenseStatus: LicenseStatus.APPROVED }
+        : {
+            licenseStatus:
+              status === BookingStatus.REQUESTED ? LicenseStatus.PENDING
+              : status === BookingStatus.DECLINED ? LicenseStatus.REJECTED
+              : LicenseStatus.APPROVED,
+            ...(extra.licenseNumber ? { licenseNumber: extra.licenseNumber } : {}),
+          }),
       status, paymentStatus: pay, paymentRef: withRef ? ref() : null, paymentMethod: withRef ? payMethods[pmIdx++ % payMethods.length] : null,
       ...(status === BookingStatus.DISPUTED ? { statusBeforeDispute: BookingStatus.COMPLETED } : {}),
     } });
   };
-  const b1 = await mk(vitz, yonas.id, daniel.id, "2026-07-12", "2026-07-15", BookingStatus.COMPLETED, PaymentStatus.PAID, true);
-  const b2 = await mk(corolla, hanna.id, daniel.id, "2026-08-02", "2026-08-03", BookingStatus.COMPLETED, PaymentStatus.PAID, true);
-  const b3 = await mk(rav4, mert.id, daniel.id, "2026-10-22", "2026-10-25", BookingStatus.CONFIRMED, PaymentStatus.HELD, true, { driveMode: DriveMode.OWNER_DRIVER, driverFeePerDay: 1000 }); // owner-driver trip
-  const b4 = await mk(vitz, hanna.id, daniel.id, "2026-10-21", "2026-10-22", BookingStatus.REQUESTED, PaymentStatus.UNPAID, false, { driveMode: DriveMode.OWN_DRIVER, driverName: "Bekele Ayana" }); // own driver — licence pending owner review
-  const b5 = await mk(corolla, ruth.id, daniel.id, "2026-11-03", "2026-11-05", BookingStatus.REQUESTED, PaymentStatus.UNPAID);
-  const b6 = await mk(corolla, yonas.id, daniel.id, "2026-11-04", "2026-11-06", BookingStatus.REQUESTED, PaymentStatus.UNPAID); // overlaps b5 → BR-05 live demo
-  const b7 = await mk(dzire, mert.id, selam.id, "2026-09-20", "2026-09-22", BookingStatus.COMPLETED, PaymentStatus.PAID, true);
-  const b8 = await mk(tucson, yonas.id, selam.id, "2026-10-19", "2026-10-26", BookingStatus.IN_PROGRESS, PaymentStatus.HELD, true);
-  const b9 = await mk(hilux, ruth.id, selam.id, "2026-08-28", "2026-08-30", BookingStatus.DECLINED, PaymentStatus.UNPAID);
-  const b10 = await mk(polo, hanna.id, aklilu.id, "2026-06-14", "2026-06-17", BookingStatus.COMPLETED, PaymentStatus.PAID, true);
-  const b11 = await mk(accent, mert.id, aklilu.id, "2026-10-05", "2026-10-07", BookingStatus.CANCELLED, PaymentStatus.REFUNDED, true);
-  const b12 = await mk(lexus, yonas.id, aklilu.id, "2026-10-08", "2026-10-10", BookingStatus.DISPUTED, PaymentStatus.PAID, true);
-  const b13 = await mk(landcruiser, ruth.id, selam.id, "2026-05-01", "2026-05-04", BookingStatus.RESOLVED, PaymentStatus.PAID, true);
+  const b1 = await mk(vitz, yonas.id, daniel.id, "2026-07-12", "2026-07-15", BookingStatus.COMPLETED, PaymentStatus.PAID, true, { licenseNumber: "ET-DL-221190" });
+  const b2 = await mk(corolla, hanna.id, daniel.id, "2026-08-02", "2026-08-03", BookingStatus.COMPLETED, PaymentStatus.PAID, true, { licenseNumber: "ET-DL-334450" });
+  const b3 = await mk(rav4, mert.id, daniel.id, "2026-10-22", "2026-10-25", BookingStatus.CONFIRMED, PaymentStatus.HELD, true, { driveMode: DriveMode.OWNER_DRIVER, driverFeePerDay: 1000 }); // owner-driver trip — no licence review
+  const b4 = await mk(vitz, hanna.id, daniel.id, "2026-10-21", "2026-10-22", BookingStatus.REQUESTED, PaymentStatus.UNPAID, false, { driveMode: DriveMode.OWN_DRIVER, driverName: "Bekele Ayana", licenseNumber: "ET-DM-778120" }); // own driver — licence pending owner review
+  const b5 = await mk(corolla, ruth.id, daniel.id, "2026-11-03", "2026-11-05", BookingStatus.REQUESTED, PaymentStatus.UNPAID, false, { licenseNumber: "ET-DL-667890" }); // self-drive request — renter's licence pending owner review
+  const b6 = await mk(corolla, yonas.id, daniel.id, "2026-11-04", "2026-11-06", BookingStatus.REQUESTED, PaymentStatus.UNPAID, false, { licenseNumber: "ET-DL-221190" }); // overlaps b5 → BR-05 live demo
+  const b7 = await mk(dzire, mert.id, selam.id, "2026-09-20", "2026-09-22", BookingStatus.COMPLETED, PaymentStatus.PAID, true, { licenseNumber: "ET-DL-556780" });
+  const b8 = await mk(tucson, yonas.id, selam.id, "2026-10-19", "2026-10-26", BookingStatus.IN_PROGRESS, PaymentStatus.HELD, true, { licenseNumber: "ET-DL-221190" });
+  const b9 = await mk(hilux, ruth.id, selam.id, "2026-08-28", "2026-08-30", BookingStatus.DECLINED, PaymentStatus.UNPAID, false, { licenseNumber: "ET-DL-667890" }); // declined → licence rejected with it
+  const b10 = await mk(polo, hanna.id, aklilu.id, "2026-06-14", "2026-06-17", BookingStatus.COMPLETED, PaymentStatus.PAID, true, { licenseNumber: "ET-DL-334450" });
+  const b11 = await mk(accent, mert.id, aklilu.id, "2026-10-05", "2026-10-07", BookingStatus.CANCELLED, PaymentStatus.REFUNDED, true, { licenseNumber: "ET-DL-556780" });
+  const b12 = await mk(lexus, yonas.id, aklilu.id, "2026-10-08", "2026-10-10", BookingStatus.DISPUTED, PaymentStatus.PAID, true, { licenseNumber: "ET-DL-221190" });
+  const b13 = await mk(landcruiser, ruth.id, selam.id, "2026-05-01", "2026-05-04", BookingStatus.RESOLVED, PaymentStatus.PAID, true, { licenseNumber: "ET-DL-667890" });
 
   // ── Reviews (BR-06) + one owner reply (FR-31) ─────────────────────────
   const rv = (b: { id: string }, car: { id: string }, renterId: string, ownerId: string, rating: number, comment: string, reply?: string) =>
@@ -146,7 +146,7 @@ async function main() {
   ] });
 
   console.log("Seeded:", { users: 9, cars: cars.length, bookings: 13, reviews: 5, disputes: 2 });
-  console.log("Drive modes (FR-49): b3 OWNER_DRIVER (+ETB 1000/day), b4 OWN_DRIVER (licence pending review); renters have admin-approved licences (FR-50). Corolla +ETB 900/day, Lexus +ETB 1500/day.");
+  console.log("Drive modes (FR-49): b3 OWNER_DRIVER (+ETB 1000/day), b4 OWN_DRIVER + b5 SELF_DRIVE licences pending owner review, b9 declined → licence rejected. Corolla +ETB 900/day, Lexus +ETB 1500/day.");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); }).finally(() => db.$disconnect());

@@ -94,33 +94,6 @@ export async function rejectListingAction(formData: FormData): Promise<void> {
   revalidatePath("/owner/cars");
 }
 
-/** FR-50 / BR-08: approve a renter's driving licence — unlocks self-drive bookings
- *  on every car. Decided ONLY here (admin), never by owners. */
-export async function approveDrivingLicenseAction(formData: FormData): Promise<void> {
-  await requireRole("ADMIN");
-  const userId = String(formData.get("userId") ?? "");
-  const target = await db.user.findUnique({ where: { id: userId }, select: { id: true, name: true, drivingLicenseStatus: true } });
-  if (!target || target.drivingLicenseStatus !== "PENDING") return;
-  await db.user.update({ where: { id: userId }, data: { drivingLicenseStatus: "APPROVED", drivingLicenseNote: null } });
-  await notify(userId, "Driving licence approved", "Your driving licence was approved — you can now book any car self-drive.", "/profile");
-  revalidatePath("/admin/licenses");
-  revalidatePath("/profile");
-}
-
-/** FR-50 / BR-08: reject a renter's driving licence with an optional note; the
- *  renter can re-upload on /profile (status returns to PENDING). */
-export async function rejectDrivingLicenseAction(formData: FormData): Promise<void> {
-  await requireRole("ADMIN");
-  const userId = String(formData.get("userId") ?? "");
-  const note = String(formData.get("note") ?? "").trim().slice(0, 300);
-  const target = await db.user.findUnique({ where: { id: userId }, select: { id: true, drivingLicenseStatus: true } });
-  if (!target || target.drivingLicenseStatus !== "PENDING") return;
-  await db.user.update({ where: { id: userId }, data: { drivingLicenseStatus: "REJECTED", drivingLicenseNote: note || null } });
-  await notify(userId, "Driving licence rejected", note ? `Your driving licence was not approved. Reason: ${note} You can upload a clearer photo on your profile.` : "Your driving licence was not approved. Upload a clearer photo on your profile.", "/profile");
-  revalidatePath("/admin/licenses");
-  revalidatePath("/profile");
-}
-
 /** FR-41 / BR-10: suspend a demo account. */
 export async function suspendUserAction(formData: FormData): Promise<void> {
   const admin = await requireRole("ADMIN");

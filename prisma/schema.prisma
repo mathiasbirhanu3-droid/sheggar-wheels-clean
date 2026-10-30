@@ -74,21 +74,14 @@ enum LicenseStatus {
 }
 
 // FR-49: how the trip will be driven — chosen by the renter at request time.
+// Every licence travels WITH the request (Turo-style): the renter attaches their
+// own licence for SELF_DRIVE, the brought driver's licence for OWN_DRIVER, and
+// the car OWNER approves or rejects it together with the booking. No separate
+// platform-admin licence approval exists.
 enum DriveMode {
-  SELF_DRIVE   // renter drives — requires the ADMIN-approved licence on their profile
+  SELF_DRIVE   // renter drives — their own licence is attached to the request
   OWN_DRIVER   // renter brings their own driver — the driver's licence is attached to the request
   OWNER_DRIVER // the owner's professional driver comes with the car (extra fee/day set on the listing)
-}
-
-// FR-50: renter's own driving licence, reviewed once by the ADMIN on /profile.
-// Kept separate from the per-booking LicenseStatus (owner-decided) on purpose:
-// the profile licence unlocks SELF_DRIVE across every car; the booking licence
-// covers whoever actually drives this particular trip.
-enum DrivingLicenseStatus {
-  NONE     // never submitted
-  PENDING  // waiting for admin review
-  APPROVED // admin approved — self-drive unlocked platform-wide
-  REJECTED // admin rejected — renter can re-upload
 }
 
 enum DisputeStatus {
@@ -115,13 +108,6 @@ model User {
   // FR-48: OPTIONAL legal rental licence uploaded at owner registration.
   // Nullable by design — owners may add it later; it is never blocking.
   rentalLicenseDoc String?
-  // FR-50: the renter's own driving licence — uploaded once on /profile and
-  // approved by an ADMIN. Nullable columns + NONE default so existing rows
-  // survive `prisma db push` without a backfill.
-  drivingLicenseNumber String?
-  drivingLicenseDoc    String? // data URL (resized in browser) or https link
-  drivingLicenseStatus DrivingLicenseStatus @default(NONE)
-  drivingLicenseNote   String? // admin note when rejecting
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -195,11 +181,12 @@ model Booking {
   paymentStatus  PaymentStatus @default(UNPAID) // FR-20/23/24
   paymentRef     String? // SW-DEMO-XXXX (FR-24)
   paymentMethod  String? // "TeleBirr" | "CBE Birr" | "M-Pesa" | "Chapa" — frozen at pay time (BR-03 spirit)
-  // Driving licence submitted WITH the rental request (owner reviews in dashboard).
-  // Nullable in DB so pre-feature rows and admin seeds stay valid; zod requires it for new requests.
-  // FR-49 semantics by mode: SELF_DRIVE → the renter's ADMIN-approved profile licence
-  // (status starts APPROVED); OWN_DRIVER → the brought driver's licence (PENDING, owner
-  // reviews); OWNER_DRIVER → no licence needed (the owner vouches for their own driver).
+  // Driving licence submitted WITH the rental request — reviewed by the car
+  // OWNER, who approves or rejects it together with the booking. Nullable in DB
+  // so pre-feature rows stay valid; zod requires it for new requests.
+  // FR-49 semantics by mode: SELF_DRIVE → the renter's own licence (PENDING,
+  // owner reviews); OWN_DRIVER → the brought driver's licence (PENDING, owner
+  // reviews); OWNER_DRIVER → none needed (the owner vouches for their own driver).
   licenseNumber       String?       // licence number of whoever drives
   licenseImage        String?       // data URL (resized in browser) or https link
   licenseStatus       LicenseStatus @default(PENDING)
@@ -209,6 +196,13 @@ model Booking {
   driverName     String?   // OWN_DRIVER only: full name of the driver the renter brings
   driverFeePerDay Int     @default(0) // snapshot: owner-driver fee/day (0 unless OWNER_DRIVER)
   driverTotal    Int       @default(0) // snapshot: driverFeePerDay × days
+  // FR-51 clickwrap proof: WHICH terms the renter accepted and WHEN, stamped
+  // by the SERVER (never the client) at the two contract moments. Nullable so
+  // pre-feature rows survive `prisma db push` without a backfill.
+  termsVersion         String?   // rental rules version accepted at request time (lib/terms.ts)
+  termsAgreedAt        DateTime? // request-moment timestamp
+  paymentTermsVersion  String?   // payment & escrow terms version accepted at checkout
+  paymentTermsAgreedAt DateTime? // checkout-moment timestamp
   statusBeforeDispute BookingStatus?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt

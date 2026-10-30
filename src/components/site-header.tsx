@@ -29,7 +29,7 @@ export async function SiteHeader() {
           <span className="hidden sm:inline">{site.name}</span>
         </Link>
         <Badge variant="outline" className="hidden gap-1 border-amber-500/50 bg-amber-50 text-[10px] text-amber-800 md:inline-flex dark:bg-amber-950 dark:text-amber-300">
-          <ShieldCheck className="h-3 w-3" />
+          <ShieldCheck className="h-3 w-3" /> Demo data
         </Badge>
 
         <nav aria-label="Main" className="ml-4 hidden items-center gap-1 md:flex">

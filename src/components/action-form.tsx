@@ -6,7 +6,7 @@ import type { ActionState } from "@/lib/validation";
 
 type Action = (prev: ActionState, formData: FormData) => Promise<ActionState>;
 
-export function ActionForm({ action, children, className, onSuccess }: { action: Action; children: React.ReactNode; className?: string; onSuccess?: (state: ActionState) => void }) {
+export function ActionForm({ action, children, className, id, onSuccess }: { action: Action; children: React.ReactNode; className?: string; id?: string; onSuccess?: (state: ActionState) => void }) {
   const [state, formAction] = useActionState(action, {});
   useEffect(() => {
     if (state.error) toast.error(state.error);
@@ -14,7 +14,7 @@ export function ActionForm({ action, children, className, onSuccess }: { action:
     if (state.ok || state.error) onSuccess?.(state);
   }, [state]);
   return (
-    <form action={formAction} className={className}>
+    <form action={formAction} className={className} id={id}>
       {children}
     </form>
   );

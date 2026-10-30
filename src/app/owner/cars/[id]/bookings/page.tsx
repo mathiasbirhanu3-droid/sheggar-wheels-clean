@@ -61,9 +61,10 @@ export default async function CarBookingsPage({ params }: { params: Promise<{ id
                     <p className="text-sm"><span className="text-muted-foreground">Driver:</span> <span className="font-medium">{b.driverName}</span></p>
                   )}
 
-                  {/* Licence covering whoever drives (FR-49): OWN_DRIVER → the owner reviews
-                      the brought driver's licence; SELF_DRIVE → already admin-approved;
-                      OWNER_DRIVER → none needed. */}
+                  {/* Licence covering whoever drives (FR-49, Turo-style): the licence
+                      travels WITH the request — SELF_DRIVE → the renter's own;
+                      OWN_DRIVER → the brought driver's — and the OWNER approves or
+                      rejects it together with the booking. OWNER_DRIVER → none needed. */}
                   {b.driveMode !== "OWNER_DRIVER" && (b.licenseNumber || b.licenseImage) && (
                     <div className="rounded-lg border bg-muted/30 p-3">
                       <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><IdCard className="h-4 w-4 text-brand" aria-hidden /> {b.driveMode === "OWN_DRIVER" ? "Driver's licence" : "Renter's driving licence"}</p>
@@ -78,8 +79,7 @@ export default async function CarBookingsPage({ params }: { params: Promise<{ id
                         <div className="min-w-0 space-y-1 text-sm">
                           <p><span className="text-muted-foreground">Number:</span> <span className="font-mono font-medium">{b.licenseNumber ?? "—"}</span></p>
                           <LicenseStatusBadge status={b.licenseStatus} />
-                          {b.driveMode === "SELF_DRIVE" && <p className="text-xs text-muted-foreground">Already verified by the platform admin — no licence review needed from you.</p>}
-                          {b.driveMode === "OWN_DRIVER" && b.licenseStatus === "PENDING" && b.status === "REQUESTED" && <p className="text-xs text-muted-foreground">Check the photo and number, then approve or decline below.</p>}
+                          {b.licenseStatus === "PENDING" && b.status === "REQUESTED" && <p className="text-xs text-muted-foreground">Check the photo and number, then approve or decline below.</p>}
                           {b.licenseDecisionNote && <p className="text-xs text-muted-foreground">Decision note: {b.licenseDecisionNote}</p>}
                         </div>
                       </div>

@@ -3,23 +3,20 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB, formatDate } from "@/lib/pricing";
-import { BookingStatusBadge, DrivingLicenseStatusBadge } from "@/components/status-badges";
+import { BookingStatusBadge } from "@/components/status-badges";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Megaphone, CalendarPlus, Wallet, IdCard } from "lucide-react";
-import { BookingStatus, DrivingLicenseStatus } from "@prisma/client";
+import { Megaphone, CalendarPlus, Wallet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "My Bookings" };
 
 export default async function DashboardPage() {
   const user = await requireActiveUser();
-  const [bookings, announcement, licenseRow] = await Promise.all([
+  const [bookings, announcement] = await Promise.all([
     db.booking.findMany({ where: { renterId: user.id }, include: { car: { select: { make: true, model: true } } }, orderBy: { createdAt: "desc" } }),
     db.announcement.findFirst({ where: { active: true }, orderBy: { createdAt: "desc" } }),
-    db.user.findUnique({ where: { id: user.id }, select: { drivingLicenseStatus: true } }),
   ]);
-  const licenseStatus = licenseRow?.drivingLicenseStatus ?? DrivingLicenseStatus.NONE;
 
   const now = new Date();
   const next = bookings.filter((b) => ["REQUESTED", "CONFIRMED", "IN_PROGRESS"].includes(b.status) && b.endDate.getTime() >= now.getTime()).sort((a, b) => a.startDate.getTime() - b.startDate.getTime())[0];
@@ -44,24 +41,6 @@ export default async function DashboardPage() {
           <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
           <p><strong>{announcement.title}:</strong> {announcement.body}</p>
         </div>
-      )}
-
-      {licenseStatus !== DrivingLicenseStatus.APPROVED && (
-        <Card className="border-brand/30">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <div className="flex items-center gap-3">
-              <IdCard className="h-8 w-8 text-brand" aria-hidden />
-              <div>
-                <p className="font-medium">Unlock self-drive</p>
-                <p className="text-sm text-muted-foreground">Upload your driving licence — once the admin approves it, you can book any car self-drive. Booking with a driver never needs it.</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <DrivingLicenseStatusBadge status={licenseStatus} />
-              <Button asChild size="sm" variant="secondary"><Link href="/profile">Go to profile</Link></Button>
-            </div>
-          </CardContent>
-        </Card>
       )}
 
       {next && (

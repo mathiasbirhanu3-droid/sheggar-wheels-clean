@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     description: site.description,
   },
   icons: {
-    icon: [{ url: "/logo.svg", type: "image/" }],
+    icon: [{ url: "/logo.svg", type: "image/svg+xml" }],
     apple: [{ url: "/logo.svg" }],
   },
   robots: {

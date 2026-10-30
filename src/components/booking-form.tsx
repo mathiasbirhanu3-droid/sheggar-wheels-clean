@@ -1,15 +1,19 @@
 "use client";
 // Booking form with live, client-side totals mirror of the server snapshot (FR-14/18, BR-04/05)
-// and the FR-49 drive-mode chooser: SELF_DRIVE (admin-approved profile licence required),
-// OWN_DRIVER (driver's licence attached to the request), OWNER_DRIVER (extra fee/day joins
-// the total and shares the 10% platform fee). The server re-validates everything — these
-// checks are a UX fast path only (NFR-10).
+// and the FR-49 drive-mode chooser, Turo-style: SELF_DRIVE (renter's own licence attached),
+// OWN_DRIVER (driver's licence attached), OWNER_DRIVER (extra fee/day joins the total and
+// shares the 10% platform fee). EVERY licence is reviewed by the car OWNER together with
+// the request — there is no platform-admin licence approval. The server re-validates
+// everything — these checks are a UX fast path only (NFR-10).
 import { useActionState, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
 import Image from "next/image";
 import { requestBookingAction } from "@/actions/bookings";
 import { computeTotals, formatETB, toISODate } from "@/lib/pricing";
+import { RENTAL_TERMS_VERSION } from "@/lib/terms";
+import { TermsDialog } from "@/components/terms-dialog";
+import { Button } from "@/components/ui/button";
 import { SubmitButton } from "@/components/submit-button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -17,7 +21,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertTriangle, CalendarX, CarFront, CircleCheck, IdCard, UserRound, X } from "lucide-react";
 
 type DriveMode = "SELF_DRIVE" | "OWN_DRIVER" | "OWNER_DRIVER";
-type LicenseState = "NONE" | "PENDING" | "APPROVED" | "REJECTED";
 
 type Props = {
   carId: string;
@@ -27,7 +30,6 @@ type Props = {
   suspended?: boolean;
   discountPercent?: number | null; // live offer for this car — mirror of the server rule
   driverFeePerDay?: number | null; // FR-49: set → the owner offers a professional driver
-  licenseStatus?: LicenseState; // FR-50: the signed-in renter's profile licence status
 };
 
 // Resize any device photo to a small JPEG data URL (max 1280px edge, q0.82) so the
@@ -46,12 +48,12 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 const MODES: { value: DriveMode; label: string; hint: string; icon: typeof CarFront }[] = [
-  { value: "SELF_DRIVE", label: "I'll drive myself", hint: "Needs your driving licence approved by the platform admin.", icon: CarFront },
+  { value: "SELF_DRIVE", label: "I'll drive myself", hint: "Attach your driving licence — the owner checks it with your request.", icon: CarFront },
   { value: "OWN_DRIVER", label: "I'll bring my own driver", hint: "Attach the driver's licence photo + number with the request.", icon: IdCard },
   { value: "OWNER_DRIVER", label: "Use the owner's driver", hint: "Professional driver comes with the car — extra fee per day.", icon: UserRound },
 ];
 
-export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspended, discountPercent, driverFeePerDay, licenseStatus = "NONE" }: Props) {
+export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspended, discountPercent, driverFeePerDay }: Props) {
   const [state, formAction] = useActionState(requestBookingAction, {});
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
@@ -60,6 +62,18 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
   const [driverLicenseNumber, setDriverLicenseNumber] = useState("");
   const [driverLicenseImage, setDriverLicenseImage] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  // FR-51 clickwrap: the request button opens the rental-rules dialog; only
+  // "Agree & send request" submits the form. The agreed flag travels in an
+  // UNCONTROLLED hidden input set synchronously at confirm time (state updates
+  // are async — a setState + immediate requestSubmit would send the old value).
+  const [termsOpen, setTermsOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const agreedRef = useRef<HTMLInputElement>(null);
+  function confirmTerms() {
+    if (agreedRef.current) agreedRef.current.value = "1";
+    setTermsOpen(false);
+    formRef.current?.requestSubmit();
+  }
   const today = toISODate(new Date());
 
   useEffect(() => {
@@ -110,9 +124,11 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
   }
 
   // FR-49 client gates (the server repeats every one of these — NFR-10).
-  const licenseApproved = licenseStatus === "APPROVED";
-  const driverOk = driverName.trim().length >= 2 && driverLicenseNumber.trim().length >= 4 && driverLicenseImage.length > 50;
-  const modeOk = mode === "SELF_DRIVE" ? licenseApproved : mode === "OWN_DRIVER" ? driverOk : driverOption;
+  // Turo-style: SELF_DRIVE needs the renter's own licence; OWN_DRIVER also names
+  // the driver. Both licences travel with the request for the OWNER to review.
+  const licenceOk = driverLicenseNumber.trim().length >= 4 && driverLicenseImage.length > 50;
+  const driverOk = mode === "SELF_DRIVE" ? licenceOk : driverName.trim().length >= 2 && licenceOk;
+  const modeOk = mode === "OWNER_DRIVER" ? driverOption : driverOk;
   const canSubmit = check.ok && modeOk && !suspended;
 
   if (!signedIn) {
@@ -131,8 +147,11 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
   }
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form ref={formRef} action={formAction} className="space-y-4">
       <input type="hidden" name="carId" value={carId} />
+      {/* FR-51 clickwrap proof inputs — the server validates and stamps them. */}
+      <input type="hidden" name="termsVersion" value={RENTAL_TERMS_VERSION} />
+      <input type="hidden" name="termsAgreed" value="" ref={agreedRef} />
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="startDate">Pickup</Label>
@@ -181,38 +200,31 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
         </div>
       </fieldset>
 
-      {/* FR-50 self-drive gate: the profile licence must be ADMIN-approved. */}
-      {mode === "SELF_DRIVE" && !licenseApproved && (
-        <Alert>
-          <IdCard className="h-4 w-4" />
-          <AlertDescription>
-            Self-drive needs your driving licence <strong>approved by the platform admin</strong>.
-            <Link href="/profile" className="ml-1 font-medium text-brand underline-offset-4 hover:underline">Upload it on your profile →</Link>{" "}
-            {licenseStatus === "PENDING" ? "Yours is pending review — you can book with a driver meanwhile." : "You can book with a driver meanwhile."}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* OWN_DRIVER: the brought driver's licence travels with the request; the owner reviews it. */}
-      {mode === "OWN_DRIVER" && (
+      {/* FR-49 licence covering whoever drives (Turo-style): SELF_DRIVE → the
+          renter's own licence; OWN_DRIVER → the brought driver's licence. It
+          travels with the request and the OWNER approves/rejects it — there is
+          no platform-admin licence approval. */}
+      {mode !== "OWNER_DRIVER" && (
         <fieldset className="space-y-2 rounded-lg border p-3">
-          <legend className="flex items-center gap-1.5 px-1 text-sm font-semibold"><IdCard className="h-4 w-4 text-brand" aria-hidden /> Your driver</legend>
-          <p className="text-xs text-muted-foreground">The owner checks your driver&apos;s licence before approving the request.</p>
+          <legend className="flex items-center gap-1.5 px-1 text-sm font-semibold"><IdCard className="h-4 w-4 text-brand" aria-hidden /> {mode === "SELF_DRIVE" ? "Your driving licence" : "Your driver"}</legend>
+          <p className="text-xs text-muted-foreground">The owner checks this licence before approving your request.</p>
+          {mode === "OWN_DRIVER" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="driverName">Driver&apos;s full name</Label>
+              <Input
+                id="driverName"
+                name="driverName"
+                autoComplete="off"
+                placeholder="e.g. Bekele Ayana"
+                minLength={2}
+                maxLength={80}
+                value={driverName}
+                onChange={(e) => setDriverName(e.target.value)}
+              />
+            </div>
+          )}
           <div className="space-y-1.5">
-            <Label htmlFor="driverName">Driver&apos;s full name</Label>
-            <Input
-              id="driverName"
-              name="driverName"
-              autoComplete="off"
-              placeholder="e.g. Bekele Ayana"
-              minLength={2}
-              maxLength={80}
-              value={driverName}
-              onChange={(e) => setDriverName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="driverLicenseNumber">Driver&apos;s licence number</Label>
+            <Label htmlFor="driverLicenseNumber">{mode === "SELF_DRIVE" ? "Your licence number" : "Driver's licence number"}</Label>
             <Input
               id="driverLicenseNumber"
               name="driverLicenseNumber"
@@ -226,12 +238,12 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="driverLicenseImageFile">Driver&apos;s licence photo</Label>
+            <Label htmlFor="driverLicenseImageFile">{mode === "SELF_DRIVE" ? "Your licence photo" : "Driver's licence photo"}</Label>
             {driverLicenseImage ? (
               <div className="flex items-center gap-3">
-                <Image src={driverLicenseImage} alt="Driver's licence" width={64} height={48} unoptimized className="h-12 w-16 rounded-md border object-cover" />
+                <Image src={driverLicenseImage} alt="Driving licence" width={64} height={48} unoptimized className="h-12 w-16 rounded-md border object-cover" />
                 <p className="flex-1 text-xs text-muted-foreground">Attached — the owner will see this with your request.</p>
-                <button type="button" onClick={() => setDriverLicenseImage("")} aria-label="Remove driver licence photo" className="rounded-md border p-1.5 text-muted-foreground hover:bg-muted">
+                <button type="button" onClick={() => setDriverLicenseImage("")} aria-label="Remove licence photo" className="rounded-md border p-1.5 text-muted-foreground hover:bg-muted">
                   <X className="h-4 w-4" aria-hidden />
                 </button>
               </div>
@@ -275,10 +287,16 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
         </div>
       )}
 
-      <SubmitButton disabled={!canSubmit}>
-        {licenseApproved || mode !== "SELF_DRIVE" ? <CircleCheck className="mr-2 h-4 w-4" /> : <CalendarX className="mr-2 h-4 w-4" />}
+      <Button
+        type="button"
+        disabled={!canSubmit}
+        onClick={() => setTermsOpen(true)}
+        className="w-full sm:w-auto"
+      >
+        <CircleCheck className="mr-2 h-4 w-4" />
         Request booking
-      </SubmitButton>
+      </Button>
+      <TermsDialog open={termsOpen} onOpenChange={setTermsOpen} kind="rental" driveMode={mode} onConfirm={confirmTerms} />
       {state.ok && state.message && <p className="text-sm text-brand">{state.message}</p>}
       {suspended && <p className="text-sm text-red-600">Your account is suspended — actions are disabled (FR-06).</p>}
       <p className="text-xs text-muted-foreground">You will not be charged until the owner approves and you complete the escrow checkout.</p>

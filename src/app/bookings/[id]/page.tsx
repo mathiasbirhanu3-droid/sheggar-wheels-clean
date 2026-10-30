@@ -97,9 +97,10 @@ export default async function BookingDetailPage({ params, searchParams }: { para
 
       <div className="grid gap-6 md:grid-cols-[1fr_320px]">
         <div className="space-y-6">
-          {/* Licence covering whoever drives (FR-49/50): SELF_DRIVE → the renter's
-              admin-approved profile licence; OWN_DRIVER → the brought driver's licence
-              (owner-decided); OWNER_DRIVER → none needed. */}
+          {/* Licence covering whoever drives (FR-49, Turo-style): the licence travels
+              WITH the request — SELF_DRIVE → the renter's own; OWN_DRIVER → the brought
+              driver's — and the car OWNER decides it together with the booking;
+              OWNER_DRIVER → none needed. */}
           {booking.driveMode !== "OWNER_DRIVER" && (booking.licenseNumber || booking.licenseImage) && (
             <Card>
               <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><IdCard className="h-4 w-4 text-brand" aria-hidden /> {booking.driveMode === "OWN_DRIVER" ? "Driver's licence" : "Renter's driving licence"}</CardTitle></CardHeader>
@@ -116,7 +117,7 @@ export default async function BookingDetailPage({ params, searchParams }: { para
                     <p className="text-xs text-muted-foreground">
                       {booking.driveMode === "OWN_DRIVER"
                         ? `For ${booking.driverName ?? "the driver"} — brought by ${booking.renter.name} with the request.`
-                        : `Verified by the platform admin before the request (${booking.renter.name}).`}
+                        : `Submitted by ${booking.renter.name} with the request — the owner approves it together with the booking.`}
                     </p>
                     <LicenseStatusBadge status={booking.licenseStatus} />
                     {booking.licenseDecisionNote && <p className="text-xs text-muted-foreground">Owner&apos;s note: {booking.licenseDecisionNote}</p>}
@@ -251,6 +252,13 @@ export default async function BookingDetailPage({ params, searchParams }: { para
               <p className="flex justify-between text-base font-bold"><span>Total (snapshot)</span><span>{formatETB(booking.total)}</span></p>
               {booking.paymentRef && <p className="text-xs text-muted-foreground">Ref: {booking.paymentRef} · {booking.paymentMethod ?? "demo TeleBirr"} (FR-24)</p>}
               <p className="text-xs text-muted-foreground">Created {formatDateTime(booking.createdAt)}</p>
+              {/* FR-51 clickwrap proof: which terms the renter signed, and when. */}
+              {booking.termsVersion && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Scale className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />Rental rules {booking.termsVersion} · agreed {booking.termsAgreedAt ? formatDateTime(booking.termsAgreedAt) : "—"}</p>
+              )}
+              {booking.paymentTermsVersion && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Scale className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />Payment terms {booking.paymentTermsVersion} · agreed {booking.paymentTermsAgreedAt ? formatDateTime(booking.paymentTermsAgreedAt) : "—"}</p>
+              )}
             </CardContent>
           </Card>
         </aside>

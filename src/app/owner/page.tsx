@@ -1,5 +1,6 @@
 // Owner overview (FR-36/37): stats, pending requests, quick links.
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB, formatDate } from "@/lib/pricing";
@@ -30,6 +31,7 @@ export default async function OwnerPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-8">
+      <AutoRefresh />
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-bold">Owner hub</h1>

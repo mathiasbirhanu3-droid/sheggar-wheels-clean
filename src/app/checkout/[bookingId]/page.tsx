@@ -9,7 +9,7 @@ import { requireActiveUser } from "@/lib/auth";
 import { formatETB, formatDate } from "@/lib/pricing";
 import { payBookingAction } from "@/actions/bookings";
 import { ActionForm } from "@/components/action-form";
-import { SubmitButton } from "@/components/submit-button";
+import { PaymentTermsButton } from "@/components/payment-terms-button";
 import { PaymentMethodPicker } from "@/components/payment-method-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CreditCard, Lock, KeyRound, ShieldCheck, ShieldAlert } from "lucide-react";
@@ -60,10 +60,10 @@ export default async function CheckoutPage({ params }: { params: Promise<{ booki
             <p className="pt-1 text-xs text-muted-foreground">Snapshot taken when you requested the booking — it cannot change (BR-03, BR-04).</p>
           </div>
 
-          <ActionForm action={payBookingAction} className="space-y-4">
+          <ActionForm action={payBookingAction} className="space-y-4" id="checkout-form">
             <input type="hidden" name="bookingId" value={booking.id} />
             <PaymentMethodPicker userPhone={user.phone ?? ""} />
-            <SubmitButton className="w-full bg-brand text-brand-foreground hover:bg-brand/90">Pay {formatETB(booking.total)} securely</SubmitButton>
+            <PaymentTermsButton total={formatETB(booking.total)} />
           </ActionForm>
 
           <ol className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/40 p-3 text-center text-[11px] font-medium leading-tight text-muted-foreground">

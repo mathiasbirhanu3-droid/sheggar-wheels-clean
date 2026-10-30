@@ -60,10 +60,11 @@ export function signUpPasswordChecks(pw: string) {
   return passwordChecks(pw);
 }
 
-// FR-49: a rental request carries HOW the trip will be driven + the licence that
-// covers whoever drives. Conditional rules (superRefine):
-//   SELF_DRIVE  → no licence fields here; the server checks the renter's
-//                 ADMIN-approved profile licence (the gate).
+// FR-49 (Turo-style): a rental request carries HOW the trip will be driven + the
+// licence that covers whoever drives. Every licence is reviewed by the car OWNER
+// together with the booking — there is no separate platform-admin licence
+// approval. Conditional rules (superRefine):
+//   SELF_DRIVE  → the RENTER'S OWN licence (number + photo) is required.
 //   OWN_DRIVER  → the brought driver's name + licence (number + photo) are required.
 //   OWNER_DRIVER → nothing extra; the server re-checks the car really offers a driver.
 export const bookingSchema = z
@@ -72,18 +73,29 @@ export const bookingSchema = z
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a start date."),
     endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a return date."),
     driveMode: z.enum(["SELF_DRIVE", "OWN_DRIVER", "OWNER_DRIVER"]),
-    driverName: z.string().trim().max(80, "Driver name is too long.").optional().or(z.literal("")),
-    driverLicenseNumber: z.string().trim().max(40, "Licence number is too long.").optional().or(z.literal("")),
+    // These fields exist in the DOM only for SELF_DRIVE / OWN_DRIVER — FormData
+    // returns NULL for them otherwise (e.g. in OWNER_DRIVER), so the schema must
+    // accept null as "absent" (that was the "Invalid input" bug on agree & send).
+    driverName: z.string().trim().max(80, "Driver name is too long.").nullable().optional(),
+    driverLicenseNumber: z.string().trim().max(40, "Licence number is too long.").nullable().optional(),
     driverLicenseImage: z
       .string()
-      .max(3_000_000, "Driver licence photo is too large — pick a smaller file.")
+      .max(3_000_000, "Licence photo is too large — pick a smaller file.")
       .refine((v) => v === "" || v.startsWith("data:image/") || v.startsWith("https://"), {
-        message: "Driver licence photo must be an uploaded image.",
+        message: "Licence photo must be an uploaded image.",
       })
-      .optional()
-      .or(z.literal("")),
+      .nullable()
+      .optional(),
   })
   .superRefine((v, ctx) => {
+    if (v.driveMode === "SELF_DRIVE") {
+      if (!v.driverLicenseNumber || v.driverLicenseNumber.length < 4) {
+        ctx.addIssue({ code: "custom", path: ["driverLicenseNumber"], message: "Enter your driving licence number (at least 4 characters)." });
+      }
+      if (!v.driverLicenseImage || v.driverLicenseImage.length < 50) {
+        ctx.addIssue({ code: "custom", path: ["driverLicenseImage"], message: "Upload a photo of your driving licence." });
+      }
+    }
     if (v.driveMode === "OWN_DRIVER") {
       if (!v.driverName || v.driverName.length < 2) {
         ctx.addIssue({ code: "custom", path: ["driverName"], message: "Enter the full name of the driver you are bringing." });
@@ -96,23 +108,6 @@ export const bookingSchema = z
       }
     }
   });
-
-// FR-50: the renter's own driving licence, uploaded once on /profile and
-// reviewed by an ADMIN — unlocks self-drive bookings platform-wide.
-export const drivingLicenseSchema = z.object({
-  drivingLicenseNumber: z
-    .string()
-    .trim()
-    .min(4, "Enter your driving licence number (at least 4 characters).")
-    .max(40, "Licence number is too long."),
-  drivingLicenseDoc: z
-    .string()
-    .min(50, "Upload a photo of your driving licence.")
-    .max(3_000_000, "Licence photo is too large — pick a smaller file.")
-    .refine((v) => v.startsWith("data:image/") || v.startsWith("https://"), {
-      message: "Licence photo must be an uploaded image.",
-    }),
-});
 
 export const reviewSchema = z.object({
   bookingId: z.string().min(1),
