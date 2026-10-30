@@ -99,12 +99,7 @@ export function CarCard({ car }: { car: CarCardData }) {
               <Fuel className="h-3 w-3" /> {FUEL_LABEL[car.fuelType]}
             </Badge>
           </div>
-          <span
-            aria-hidden
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand/10 text-brand transition-colors duration-300 group-hover:bg-brand group-hover:text-brand-foreground"
-          >
-            <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-0.5" />
-          </span>
+          
         </CardFooter>
       </Card>
     </Link>
