@@ -83,7 +83,7 @@ export function SiteFooter() {
         {/* Bottom bar */}
         <div className="mt-10 flex flex-col items-center justify-between gap-2 border-t pt-6 text-center text-xs text-muted-foreground sm:flex-row sm:text-left">
           <p>
-            © 2026 IBT-QIYAS — {site.name} <span className="font-mono text-[11px]">v{site.version}</span>. Capstone demo; all data and payments are simulated.
+            © 2026 Sheggar Wheel — {site.name} <span className="font-mono text-[11px]">v{site.version}</span>. Drive more, spend less. Top-rated car rentals with free cancellation, flexible pick-ups, and 24/7 customer support.
           </p>
           <p className="font-mono text-[11px] text-muted-foreground/70">Built with Next.js · Prisma · PostgreSQL</p>
         </div>
