@@ -21,12 +21,13 @@ export async function GET() {
     include: { car: { select: { make: true, model: true, year: true } }, renter: { select: { name: true } } },
   });
 
-  // owner_income_etb = subtotal − discount (what the owner keeps); the 10% service
-  // fee is platform income (the admin's) and is listed separately, never merged.
-  const header = ["booking_id", "car", "renter", "start_date", "end_date", "days", "owner_income_etb", "platform_fee_etb", "released", "status"];
+  // owner_income_etb = subtotal − discount + driverTotal (what the owner keeps — the
+  // driver is the owner's); the 10% service fee on the OVERALL price (FR-49) is
+  // platform income (the admin's) and is listed separately, never merged.
+  const header = ["booking_id", "car", "renter", "drive_mode", "start_date", "end_date", "days", "driver_fee_etb", "owner_income_etb", "platform_fee_etb", "released", "status"];
   const lines = [header.map(csvCell).join(",")];
   for (const b of rows) {
-    lines.push([b.id, `${b.car.make} ${b.car.model} ${b.car.year}`, b.renter.name, toISODate(b.startDate), toISODate(b.endDate), b.days, b.subtotal - b.discountAmount, b.fee, b.paymentStatus, b.status].map(csvCell).join(","));
+    lines.push([b.id, `${b.car.make} ${b.car.model} ${b.car.year}`, b.renter.name, b.driveMode, toISODate(b.startDate), toISODate(b.endDate), b.days, b.driverTotal, b.subtotal - b.discountAmount + b.driverTotal, b.fee, b.paymentStatus, b.status].map(csvCell).join(","));
   }
   return new NextResponse(lines.join("\n"), {
     headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="sheggar-wheels-earnings-${Date.now()}.csv"` },

@@ -29,6 +29,16 @@ export const signUpSchema = z
     }),
     confirmPassword: z.string().min(1, "Re-type the password to confirm it."),
     asOwner: z.boolean().optional(),
+    // FR-48: OPTIONAL legal rental licence for owners — empty string (nothing
+    // picked) and undefined both pass; a value must be a valid uploaded image.
+    rentalLicenseDoc: z
+      .string()
+      .max(3_000_000, "Licence document is too large — pick a smaller image.")
+      .refine((v) => v === "" || v.startsWith("data:image/") || v.startsWith("https://"), {
+        message: "Licence document must be an uploaded image.",
+      })
+      .optional()
+      .or(z.literal("")),
   })
   .superRefine((v, ctx) => {
     if (v.password !== v.confirmPassword) {
@@ -50,18 +60,52 @@ export function signUpPasswordChecks(pw: string) {
   return passwordChecks(pw);
 }
 
-// A rental request must carry the renter's driving licence — the car owner
-// reviews it in the owner dashboard and decides approve/reject.
-export const bookingSchema = z.object({
-  carId: z.string().min(1),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a start date."),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a return date."),
-  licenseNumber: z
+// FR-49: a rental request carries HOW the trip will be driven + the licence that
+// covers whoever drives. Conditional rules (superRefine):
+//   SELF_DRIVE  → no licence fields here; the server checks the renter's
+//                 ADMIN-approved profile licence (the gate).
+//   OWN_DRIVER  → the brought driver's name + licence (number + photo) are required.
+//   OWNER_DRIVER → nothing extra; the server re-checks the car really offers a driver.
+export const bookingSchema = z
+  .object({
+    carId: z.string().min(1),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a start date."),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a return date."),
+    driveMode: z.enum(["SELF_DRIVE", "OWN_DRIVER", "OWNER_DRIVER"]),
+    driverName: z.string().trim().max(80, "Driver name is too long.").optional().or(z.literal("")),
+    driverLicenseNumber: z.string().trim().max(40, "Licence number is too long.").optional().or(z.literal("")),
+    driverLicenseImage: z
+      .string()
+      .max(3_000_000, "Driver licence photo is too large — pick a smaller file.")
+      .refine((v) => v === "" || v.startsWith("data:image/") || v.startsWith("https://"), {
+        message: "Driver licence photo must be an uploaded image.",
+      })
+      .optional()
+      .or(z.literal("")),
+  })
+  .superRefine((v, ctx) => {
+    if (v.driveMode === "OWN_DRIVER") {
+      if (!v.driverName || v.driverName.length < 2) {
+        ctx.addIssue({ code: "custom", path: ["driverName"], message: "Enter the full name of the driver you are bringing." });
+      }
+      if (!v.driverLicenseNumber || v.driverLicenseNumber.length < 4) {
+        ctx.addIssue({ code: "custom", path: ["driverLicenseNumber"], message: "Enter your driver's licence number (at least 4 characters)." });
+      }
+      if (!v.driverLicenseImage || v.driverLicenseImage.length < 50) {
+        ctx.addIssue({ code: "custom", path: ["driverLicenseImage"], message: "Upload a photo of your driver's licence." });
+      }
+    }
+  });
+
+// FR-50: the renter's own driving licence, uploaded once on /profile and
+// reviewed by an ADMIN — unlocks self-drive bookings platform-wide.
+export const drivingLicenseSchema = z.object({
+  drivingLicenseNumber: z
     .string()
     .trim()
     .min(4, "Enter your driving licence number (at least 4 characters).")
     .max(40, "Licence number is too long."),
-  licenseImage: z
+  drivingLicenseDoc: z
     .string()
     .min(50, "Upload a photo of your driving licence.")
     .max(3_000_000, "Licence photo is too large — pick a smaller file.")
@@ -109,6 +153,39 @@ export const carSchema = z.object({
     )
     .min(1, "Add at least one photo.")
     .max(5, "A car can have at most 5 photos."),
+  // FR-47: the technical valuation report is REQUIRED on every new/edited
+  // listing — same storage pattern as the booking licence photo (data URL,
+  // resized in the browser). valuationAmount is the owner-declared market
+  // value in ETB, optional but validated when given.
+  valuationDoc: z.preprocess(
+    // missing key / null (no hidden input was submitted) becomes "" so the
+    // friendly min() message fires instead of a raw zod type error
+    (v) => (typeof v === "string" ? v : ""),
+    z
+      .string()
+      .min(50, "Upload the technical valuation report — a photo or scan of the document.")
+      .max(3_000_000, "Valuation document is too large — pick a smaller image.")
+      .refine((v) => v.startsWith("data:image/") || v.startsWith("https://"), {
+        message: "Valuation document must be an uploaded image.",
+      })
+  ),
+  valuationAmount: z.coerce
+    .number()
+    .int("Market value must be a whole number of ETB.")
+    .min(0, "Market value cannot be negative.")
+    .max(100_000_000, "Market value looks too large — check the digits.")
+    .optional(),
+  // FR-49: OPTIONAL daily fee for the owner-provided driver. Empty → undefined
+  // (car stays without the owner-driver option; on update the field is cleared).
+  driverFeePerDay: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    z.coerce
+      .number()
+      .int("Driver fee must be a whole number of ETB.")
+      .min(100, "If you offer a driver, the fee must be at least ETB 100/day.")
+      .max(50_000, "Driver fee looks too large — check the digits.")
+      .optional()
+  ),
 });
 
 export const disputeSchema = z.object({

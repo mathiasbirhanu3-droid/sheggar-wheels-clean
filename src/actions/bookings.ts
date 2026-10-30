@@ -26,8 +26,14 @@ function refresh(id: string) {
   revalidatePath("/admin/bookings");
 }
 
-/** FR-17/18: create a request with a server-side price snapshot. The request MUST carry
- *  the renter's driving licence (number + photo) — the owner reviews it in the dashboard. */
+/** FR-17/18 + FR-49: create a request with a server-side price snapshot and the
+ *  drive mode. Licence rules by mode:
+ *  - SELF_DRIVE: the renter's profile licence must already be ADMIN-approved
+ *    (the gate); its number/photo are snapshotted for the owner's handover.
+ *  - OWN_DRIVER: the brought driver's licence (number + photo) travels with the
+ *    request and the OWNER reviews it (status PENDING).
+ *  - OWNER_DRIVER: the owner vouches for their own driver — no licence upload;
+ *    the listing's daily driver fee joins the total and shares the 10% fee. */
 export async function requestBookingAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requireActiveUser();
   const rl = rateLimit(await scopedKey("booking"), 10, 60_000); // 10 requests / min / IP (spam guard)
@@ -36,16 +42,45 @@ export async function requestBookingAction(_prev: ActionState, formData: FormDat
     carId: formData.get("carId"),
     startDate: formData.get("startDate"),
     endDate: formData.get("endDate"),
-    licenseNumber: formData.get("licenseNumber"),
-    licenseImage: formData.get("licenseImage"),
+    driveMode: formData.get("driveMode"),
+    driverName: formData.get("driverName"),
+    driverLicenseNumber: formData.get("driverLicenseNumber"),
+    driverLicenseImage: formData.get("driverLicenseImage"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  const { driveMode } = parsed.data;
   const start = new Date(parsed.data.startDate + "T00:00:00.000Z");
   const end = new Date(parsed.data.endDate + "T00:00:00.000Z");
 
-  const result = await validateNewBooking(parsed.data.carId, start, end);
+  // Licence state BEFORE any price work — the self-drive gate is server-side (BR-11).
+  const me = await db.user.findUnique({
+    where: { id: user.id },
+    select: { drivingLicenseStatus: true, drivingLicenseNumber: true, drivingLicenseDoc: true },
+  });
+
+  // Effective owner-driver fee: only when the renter picked OWNER_DRIVER.
+  // The car row arrives from validateNewBooking; fetch the fee up front so the
+  // gate errors are cheap and clear.
+  const carProbe = await db.car.findUnique({ where: { id: parsed.data.carId }, select: { driverFeePerDay: true } });
+  const ownerDriverFee = driveMode === "OWNER_DRIVER" ? carProbe?.driverFeePerDay ?? 0 : 0;
+  if (driveMode === "OWNER_DRIVER" && !ownerDriverFee) {
+    return { error: "This owner does not offer a driver for this car — choose self-drive or bring your own driver." };
+  }
+  if (driveMode === "SELF_DRIVE" && me?.drivingLicenseStatus !== "APPROVED") {
+    return { error: "Self-drive needs your driving licence approved by the platform admin. Upload it on your profile page, or book with a driver instead." };
+  }
+
+  const result = await validateNewBooking(parsed.data.carId, start, end, undefined, ownerDriverFee);
   if ("error" in result && result.error) return { error: result.error };
   const car = result.car!;
+
+  // Licence snapshot per mode (see doc above).
+  const licence =
+    driveMode === "SELF_DRIVE"
+      ? { licenseNumber: me!.drivingLicenseNumber, licenseImage: me!.drivingLicenseDoc, licenseStatus: LicenseStatus.APPROVED }
+      : driveMode === "OWN_DRIVER"
+        ? { licenseNumber: parsed.data.driverLicenseNumber!, licenseImage: parsed.data.driverLicenseImage!, licenseStatus: LicenseStatus.PENDING }
+        : { licenseNumber: null, licenseImage: null, licenseStatus: LicenseStatus.APPROVED }; // OWNER_DRIVER
 
   const booking = await db.booking.create({
     data: {
@@ -53,15 +88,19 @@ export async function requestBookingAction(_prev: ActionState, formData: FormDat
       startDate: start, endDate: end, days: result.totals!.days,
       pricePerDay: car.pricePerDay, subtotal: result.totals!.subtotal,
       discountPercent: result.totals!.discountPercent, discountAmount: result.totals!.discountAmount,
+      // FR-49 snapshots: driver fee is frozen with the price (BR-03).
+      driveMode, driverName: driveMode === "OWN_DRIVER" ? parsed.data.driverName! : null,
+      driverFeePerDay: result.totals!.driverFeePerDay, driverTotal: result.totals!.driverTotal,
       fee: result.totals!.fee, total: result.totals!.total,
       status: BookingStatus.REQUESTED, paymentStatus: PaymentStatus.UNPAID,
-      // Driving licence travels WITH the request and lands in the DB right here:
-      licenseNumber: parsed.data.licenseNumber,
-      licenseImage: parsed.data.licenseImage,
-      licenseStatus: LicenseStatus.PENDING,
+      ...licence,
     },
   });
-  await notify(car.ownerId, "New booking request", `${user.name} requested your ${car.make} ${car.model} for ${formatDate(start)} - ${formatDate(end)} (${formatETB(booking.total)}). A driving licence was submitted — review it before approving.`, "/owner/cars/" + car.id + "/bookings");
+  const modeLine =
+    driveMode === "SELF_DRIVE" ? "Self-drive — licence already verified by the platform admin."
+    : driveMode === "OWN_DRIVER" ? `Own driver (${parsed.data.driverName}) — driver's licence attached, review it before approving.`
+    : "With your professional driver — no licence review needed.";
+  await notify(car.ownerId, "New booking request", `${user.name} requested your ${car.make} ${car.model} for ${formatDate(start)} - ${formatDate(end)} (${formatETB(booking.total)}). ${modeLine}`, "/owner/cars/" + car.id + "/bookings");
   refresh(booking.id);
   revalidatePath("/cars/" + car.id);
   redirect("/bookings/" + booking.id);
@@ -78,9 +117,9 @@ export async function approveBookingAction(_prev: ActionState, formData: FormDat
   const conflict = await findConflict(booking.carId, booking.startDate, booking.endDate, booking.id, HARD_HOLD_STATUSES);
   if (conflict) return { error: "Another confirmed booking already covers these dates — approval refused (BR-05)." };
   await db.booking.update({ where: { id }, data: { status: BookingStatus.CONFIRMED, licenseStatus: LicenseStatus.APPROVED } });
-  await notify(booking.renterId, "Booking confirmed", `Your ${booking.car.make} ${booking.car.model} trip from ${formatDate(booking.startDate)} is confirmed — your driving licence was approved. Pick a payment method at checkout (TeleBirr, CBE Birr, M-Pesa or Chapa).`, "/bookings/" + id);
+  await notify(booking.renterId, "Booking confirmed", `Your ${booking.car.make} ${booking.car.model} trip from ${formatDate(booking.startDate)} is confirmed${booking.driveMode === "OWN_DRIVER" ? " — your driver's licence was approved" : ""}. Pick a payment method at checkout (TeleBirr, CBE Birr, M-Pesa or Chapa).`, "/bookings/" + id);
   refresh(id);
-  return { ok: true, message: "Booking confirmed — licence approved. The renter can now pay at checkout." };
+  return { ok: true, message: booking.driveMode === "OWN_DRIVER" ? "Booking confirmed — driver's licence approved. The renter can now pay at checkout." : "Booking confirmed. The renter can now pay at checkout." };
 }
 
 /** FR-20: owner declines — the driving licence is rejected with it (optional reason). */
@@ -94,7 +133,7 @@ export async function declineBookingAction(_prev: ActionState, formData: FormDat
   await db.booking.update({ where: { id }, data: { status: BookingStatus.DECLINED, licenseStatus: LicenseStatus.REJECTED, ...(note ? { licenseDecisionNote: note } : {}) } });
   await notify(booking.renterId, "Booking declined", `The owner declined your request for the ${booking.car.make} ${booking.car.model}.${note ? ` Reason: ${note}` : " No payment was taken."}`, "/bookings/" + id);
   refresh(id);
-  return { ok: true, message: "Request declined — the submitted licence was rejected." };
+  return { ok: true, message: "Request declined." };
 }
 
 /** FR-21: renter cancels when the lifecycle permits it. */

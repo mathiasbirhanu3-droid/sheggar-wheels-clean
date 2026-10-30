@@ -9,15 +9,18 @@ export function daysInclusive(start: Date, end: Date): number {
 
 export type Totals = {
   days: number;
-  subtotal: number;        // pre-discount: pricePerDay × days
+  subtotal: number;        // pre-discount: pricePerDay × days (car only)
   discountPercent: number; // 0 = no discount (sanitised, never negative)
   discountAmount: number;  // ETB saved, rounded to whole birr
-  fee: number;             // 10% of the POST-discount amount — you pay fee on what you actually pay
-  total: number;           // subtotal − discountAmount + fee
+  driverFeePerDay: number; // snapshot: owner-driver fee/day (0 unless OWNER_DRIVER mode)
+  driverTotal: number;     // snapshot: driverFeePerDay × days
+  fee: number;             // 10% of the POST-discount car amount + driver fee — the fee base is the OVERALL booking price (FR-49)
+  total: number;           // subtotal − discountAmount + driverTotal + fee
 };
 
-/** Snapshot maths (BR-03/BR-04) with an optional discount percent. Returns null for an invalid range. */
-export function computeTotals(pricePerDay: number, start: Date, end: Date, discountPercent = 0): Totals | null {
+/** Snapshot maths (BR-03/BR-04) with an optional discount percent and an optional
+ *  owner-driver daily fee (FR-49). Returns null for an invalid range. */
+export function computeTotals(pricePerDay: number, start: Date, end: Date, discountPercent = 0, driverFeePerDay = 0): Totals | null {
   if (!(start instanceof Date) || !(end instanceof Date) || isNaN(start.getTime()) || isNaN(end.getTime())) return null;
   if (end.getTime() < start.getTime()) return null;
   const days = daysInclusive(start, end);
@@ -25,9 +28,12 @@ export function computeTotals(pricePerDay: number, start: Date, end: Date, disco
   // Sanitise here so every caller inherits safe maths: negative/NaN percent → 0, never above 100.
   const pct = Number.isFinite(discountPercent) && discountPercent > 0 ? Math.min(Math.round(discountPercent), 100) : 0;
   const discountAmount = Math.round((subtotal * pct) / 100);
+  const driver = Number.isFinite(driverFeePerDay) && driverFeePerDay > 0 ? Math.round(driverFeePerDay) : 0;
+  const driverTotal = driver * days;
   const discounted = subtotal - discountAmount;
-  const fee = Math.round(discounted * PLATFORM_FEE_RATE); // BR-04
-  return { days, subtotal, discountPercent: pct, discountAmount, fee, total: discounted + fee };
+  // FR-49: the 10% platform fee applies to the OVERALL booking price — car (post-discount) + owner driver fee.
+  const fee = Math.round((discounted + driverTotal) * PLATFORM_FEE_RATE); // BR-04
+  return { days, subtotal, discountPercent: pct, discountAmount, driverFeePerDay: driver, driverTotal, fee, total: discounted + driverTotal + fee };
 }
 
 export function formatETB(n: number): string {

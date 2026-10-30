@@ -1,8 +1,9 @@
 "use client";
-// Booking form with live, client-side totals mirror of the server snapshot (FR-14/18, BR-04/05).
-// Every request must include the renter's DRIVING LICENCE (number + photo) — the car owner
-// reviews it in their dashboard and decides approve/reject. The server re-validates everything;
-// these checks are a UX fast path only (NFR-10).
+// Booking form with live, client-side totals mirror of the server snapshot (FR-14/18, BR-04/05)
+// and the FR-49 drive-mode chooser: SELF_DRIVE (admin-approved profile licence required),
+// OWN_DRIVER (driver's licence attached to the request), OWNER_DRIVER (extra fee/day joins
+// the total and shares the 10% platform fee). The server re-validates everything — these
+// checks are a UX fast path only (NFR-10).
 import { useActionState, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -13,7 +14,10 @@ import { SubmitButton } from "@/components/submit-button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, CalendarX, IdCard, X } from "lucide-react";
+import { AlertTriangle, CalendarX, CarFront, CircleCheck, IdCard, UserRound, X } from "lucide-react";
+
+type DriveMode = "SELF_DRIVE" | "OWN_DRIVER" | "OWNER_DRIVER";
+type LicenseState = "NONE" | "PENDING" | "APPROVED" | "REJECTED";
 
 type Props = {
   carId: string;
@@ -22,6 +26,8 @@ type Props = {
   signedIn: boolean;
   suspended?: boolean;
   discountPercent?: number | null; // live offer for this car — mirror of the server rule
+  driverFeePerDay?: number | null; // FR-49: set → the owner offers a professional driver
+  licenseStatus?: LicenseState; // FR-50: the signed-in renter's profile licence status
 };
 
 // Resize any device photo to a small JPEG data URL (max 1280px edge, q0.82) so the
@@ -39,12 +45,20 @@ async function fileToDataUrl(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
-export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspended, discountPercent }: Props) {
+const MODES: { value: DriveMode; label: string; hint: string; icon: typeof CarFront }[] = [
+  { value: "SELF_DRIVE", label: "I'll drive myself", hint: "Needs your driving licence approved by the platform admin.", icon: CarFront },
+  { value: "OWN_DRIVER", label: "I'll bring my own driver", hint: "Attach the driver's licence photo + number with the request.", icon: IdCard },
+  { value: "OWNER_DRIVER", label: "Use the owner's driver", hint: "Professional driver comes with the car — extra fee per day.", icon: UserRound },
+];
+
+export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspended, discountPercent, driverFeePerDay, licenseStatus = "NONE" }: Props) {
   const [state, formAction] = useActionState(requestBookingAction, {});
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
-  const [licenseNumber, setLicenseNumber] = useState("");
-  const [licenseImage, setLicenseImage] = useState("");
+  const [mode, setMode] = useState<DriveMode>("SELF_DRIVE");
+  const [driverName, setDriverName] = useState("");
+  const [driverLicenseNumber, setDriverLicenseNumber] = useState("");
+  const [driverLicenseImage, setDriverLicenseImage] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const today = toISODate(new Date());
 
@@ -65,7 +79,7 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
       return;
     }
     try {
-      setLicenseImage(await fileToDataUrl(file));
+      setDriverLicenseImage(await fileToDataUrl(file));
     } catch {
       toast.error("Could not read that image — try another file.");
     }
@@ -73,6 +87,9 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
 
   const blockedSet = new Set(blockedDates);
   const pct = Number.isFinite(discountPercent) && discountPercent! > 0 ? Math.min(Math.round(discountPercent!), 100) : 0;
+  // The listing offers an owner driver (FR-49) — independent of the chosen mode.
+  const driverOption = !!driverFeePerDay && driverFeePerDay > 0;
+  const ownerDriver = mode === "OWNER_DRIVER" && driverOption; // the fee only applies IN that mode
   let check: { ok: boolean; msg: string; totals: ReturnType<typeof computeTotals> | null };
   {
     if (!start || !end) check = { ok: false, msg: "Pick both a start and a return date.", totals: null };
@@ -87,11 +104,16 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
           if (blockedSet.has(toISODate(d))) { clash = true; break; }
         }
         if (clash) check = { ok: false, msg: "Some selected days are unavailable. Adjust your range.", totals: null };
-        else check = { ok: true, msg: "", totals: computeTotals(pricePerDay, s, e, pct)! };
+        else check = { ok: true, msg: "", totals: computeTotals(pricePerDay, s, e, pct, ownerDriver ? driverFeePerDay! : 0)! };
       }
     }
   }
-  const licenseOk = licenseNumber.trim().length >= 4 && licenseImage.length > 50;
+
+  // FR-49 client gates (the server repeats every one of these — NFR-10).
+  const licenseApproved = licenseStatus === "APPROVED";
+  const driverOk = driverName.trim().length >= 2 && driverLicenseNumber.trim().length >= 4 && driverLicenseImage.length > 50;
+  const modeOk = mode === "SELF_DRIVE" ? licenseApproved : mode === "OWN_DRIVER" ? driverOk : driverOption;
+  const canSubmit = check.ok && modeOk && !suspended;
 
   if (!signedIn) {
     return (
@@ -126,6 +148,112 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
         <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertDescription>{check.msg}</AlertDescription></Alert>
       )}
 
+      {/* FR-49: how will you drive? The third option appears only when the owner
+          set a driver fee on the listing. The server re-checks every gate (BR-11). */}
+      <fieldset className="space-y-2 rounded-lg border p-3">
+        <legend className="flex items-center gap-1.5 px-1 text-sm font-semibold"><CarFront className="h-4 w-4 text-brand" aria-hidden /> How will you drive?</legend>
+        <div className="space-y-2" role="radiogroup" aria-label="Drive mode">
+          {MODES.filter((m) => m.value !== "OWNER_DRIVER" || driverOption).map((m) => {
+            const active = mode === m.value;
+            return (
+              <label
+                key={m.value}
+                className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 text-sm transition-colors ${active ? "border-brand bg-brand/5 ring-1 ring-brand" : "hover:bg-muted/50"}`}
+              >
+                <input
+                  type="radio"
+                  name="driveMode"
+                  value={m.value}
+                  checked={active}
+                  onChange={() => setMode(m.value)}
+                  className="mt-0.5 h-4 w-4 accent-[var(--brand,#0f766e)]"
+                  aria-describedby={`mode-hint-${m.value}`}
+                />
+                <span className="flex-1">
+                  <span className="flex items-center gap-1.5 font-medium"><m.icon className="h-4 w-4 text-brand" aria-hidden /> {m.label}</span>
+                  <span id={`mode-hint-${m.value}`} className="mt-0.5 block text-xs text-muted-foreground">
+                    {m.value === "OWNER_DRIVER" ? `+${formatETB(driverFeePerDay ?? 0)} per day — added to your total.` : m.hint}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      {/* FR-50 self-drive gate: the profile licence must be ADMIN-approved. */}
+      {mode === "SELF_DRIVE" && !licenseApproved && (
+        <Alert>
+          <IdCard className="h-4 w-4" />
+          <AlertDescription>
+            Self-drive needs your driving licence <strong>approved by the platform admin</strong>.
+            <Link href="/profile" className="ml-1 font-medium text-brand underline-offset-4 hover:underline">Upload it on your profile →</Link>{" "}
+            {licenseStatus === "PENDING" ? "Yours is pending review — you can book with a driver meanwhile." : "You can book with a driver meanwhile."}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* OWN_DRIVER: the brought driver's licence travels with the request; the owner reviews it. */}
+      {mode === "OWN_DRIVER" && (
+        <fieldset className="space-y-2 rounded-lg border p-3">
+          <legend className="flex items-center gap-1.5 px-1 text-sm font-semibold"><IdCard className="h-4 w-4 text-brand" aria-hidden /> Your driver</legend>
+          <p className="text-xs text-muted-foreground">The owner checks your driver&apos;s licence before approving the request.</p>
+          <div className="space-y-1.5">
+            <Label htmlFor="driverName">Driver&apos;s full name</Label>
+            <Input
+              id="driverName"
+              name="driverName"
+              autoComplete="off"
+              placeholder="e.g. Bekele Ayana"
+              minLength={2}
+              maxLength={80}
+              value={driverName}
+              onChange={(e) => setDriverName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="driverLicenseNumber">Driver&apos;s licence number</Label>
+            <Input
+              id="driverLicenseNumber"
+              name="driverLicenseNumber"
+              inputMode="text"
+              autoComplete="off"
+              placeholder="e.g. ET-DM-0031452"
+              minLength={4}
+              maxLength={40}
+              value={driverLicenseNumber}
+              onChange={(e) => setDriverLicenseNumber(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="driverLicenseImageFile">Driver&apos;s licence photo</Label>
+            {driverLicenseImage ? (
+              <div className="flex items-center gap-3">
+                <Image src={driverLicenseImage} alt="Driver's licence" width={64} height={48} unoptimized className="h-12 w-16 rounded-md border object-cover" />
+                <p className="flex-1 text-xs text-muted-foreground">Attached — the owner will see this with your request.</p>
+                <button type="button" onClick={() => setDriverLicenseImage("")} aria-label="Remove driver licence photo" className="rounded-md border p-1.5 text-muted-foreground hover:bg-muted">
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  ref={fileRef}
+                  id="driverLicenseImageFile"
+                  type="file"
+                  accept="image/*"
+                  onChange={onPickFile}
+                  className="w-full cursor-pointer rounded-md border border-input bg-background text-sm file:mr-3 file:cursor-pointer file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/80"
+                />
+                <p className="text-xs text-muted-foreground">JPG or PNG. Large phone photos are resized automatically in your browser.</p>
+              </>
+            )}
+          </div>
+          {/* The action contract: the data URL travels in this hidden input. */}
+          <input type="hidden" name="driverLicenseImage" value={driverLicenseImage} />
+        </fieldset>
+      )}
+
       {check.totals && (
         <div className="space-y-1 rounded-lg border bg-muted/40 p-3 text-sm" aria-live="polite">
           <p className="flex justify-between"><span>{check.totals.days} day{check.totals.days > 1 ? "s" : ""} × {formatETB(pricePerDay)}</span><span>{formatETB(check.totals.subtotal)}</span></p>
@@ -138,61 +266,19 @@ export function BookingForm({ carId, pricePerDay, blockedDates, signedIn, suspen
               <span>−{formatETB(check.totals.discountAmount)}</span>
             </p>
           )}
+          {ownerDriver && (
+            <p className="flex justify-between"><span className="flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5 text-brand" aria-hidden /> Owner&apos;s driver · {check.totals.days} day{check.totals.days > 1 ? "s" : ""} × {formatETB(check.totals.driverFeePerDay)}</span><span>{formatETB(check.totals.driverTotal)}</span></p>
+          )}
           <p className="flex justify-between text-muted-foreground"><span>Platform fee (10%)</span><span>{formatETB(check.totals.fee)}</span></p>
           <p className="flex justify-between border-t pt-1 font-semibold"><span>Total</span><span>{formatETB(check.totals.total)}</span></p>
-          <p className="pt-1 text-xs text-muted-foreground">This exact total is snapshotted at request time — later price edits never change it (BR-03). The discount is frozen with it.</p>
+          <p className="pt-1 text-xs text-muted-foreground">This exact total is snapshotted at request time — later price edits never change it (BR-03). The 10% fee applies to the overall booking price, including the driver fee.</p>
         </div>
       )}
 
-      {/* Driving licence — required with the request; the owner reviews it before approving. */}
-      <fieldset className="space-y-2 rounded-lg border p-3">
-        <legend className="flex items-center gap-1.5 px-1 text-sm font-semibold"><IdCard className="h-4 w-4 text-brand" aria-hidden /> Driving licence</legend>
-        <p className="text-xs text-muted-foreground">The owner checks your licence before approving the request. It stays private between you and the owner.</p>
-        <div className="space-y-1.5">
-          <Label htmlFor="licenseNumber">Licence number</Label>
-          <Input
-            id="licenseNumber"
-            name="licenseNumber"
-            inputMode="text"
-            autoComplete="off"
-            placeholder="e.g. ET-DM-0031452"
-            minLength={4}
-            maxLength={40}
-            required
-            value={licenseNumber}
-            onChange={(e) => setLicenseNumber(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="licenseImageFile">Licence photo</Label>
-          {licenseImage ? (
-            <div className="flex items-center gap-3">
-              <Image src={licenseImage} alt="Your driving licence" width={64} height={48} unoptimized className="h-12 w-16 rounded-md border object-cover" />
-              <p className="flex-1 text-xs text-muted-foreground">Attached — the owner will see this with your request.</p>
-              <button type="button" onClick={() => setLicenseImage("")} aria-label="Remove licence photo" className="rounded-md border p-1.5 text-muted-foreground hover:bg-muted">
-                <X className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
-          ) : (
-            <>
-              <input
-                ref={fileRef}
-                id="licenseImageFile"
-                type="file"
-                accept="image/*"
-                onChange={onPickFile}
-                className="w-full cursor-pointer rounded-md border border-input bg-background text-sm file:mr-3 file:cursor-pointer file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/80"
-                required
-              />
-              <p className="text-xs text-muted-foreground">JPG or PNG. Large phone photos are resized automatically in your browser.</p>
-            </>
-          )}
-        </div>
-        {/* The action contract: the data URL travels in this hidden input. */}
-        <input type="hidden" name="licenseImage" value={licenseImage} />
-      </fieldset>
-
-      <SubmitButton disabled={!check.ok || !licenseOk || suspended}>Request booking</SubmitButton>
+      <SubmitButton disabled={!canSubmit}>
+        {licenseApproved || mode !== "SELF_DRIVE" ? <CircleCheck className="mr-2 h-4 w-4" /> : <CalendarX className="mr-2 h-4 w-4" />}
+        Request booking
+      </SubmitButton>
       {state.ok && state.message && <p className="text-sm text-brand">{state.message}</p>}
       {suspended && <p className="text-sm text-red-600">Your account is suspended — actions are disabled (FR-06).</p>}
       <p className="text-xs text-muted-foreground">You will not be charged until the owner approves and you complete the escrow checkout.</p>

@@ -1,5 +1,7 @@
-// Listing moderation (FR-40, BR-02).
+// Listing moderation (FR-40, BR-02) + FR-47: the admin verifies the
+// technical valuation document before approving a listing.
 import Link from "next/link";
+import Image from "next/image";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB } from "@/lib/pricing";
@@ -35,6 +37,18 @@ export default async function AdminListingsPage() {
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-2 font-semibold">{car.make} {car.model} {car.year} <CarStatusBadge status={car.status} /></p>
                   <p className="text-sm text-muted-foreground">by {car.owner.name} · {car.neighbourhood} · {formatETB(car.pricePerDay)}/day · {car._count.bookings} bookings</p>
+                  {/* FR-47: technical valuation evidence — checked before approval (BR-02). */}
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-medium text-foreground">Technical valuation:</span>
+                    {car.valuationDoc ? (
+                      <a href={car.valuationDoc} target="_blank" rel="noopener noreferrer" title="Open the valuation report full size" className="shrink-0">
+                        <Image src={car.valuationDoc} alt={`Valuation report for ${car.make} ${car.model}`} width={72} height={54} unoptimized className="h-[54px] w-[72px] cursor-zoom-in rounded border object-cover" />
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">not provided (listing created before FR-47)</span>
+                    )}
+                    {car.valuationAmount != null && <span className="text-muted-foreground">· declared value {formatETB(car.valuationAmount)}</span>}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   {car.status !== CarStatus.APPROVED && (

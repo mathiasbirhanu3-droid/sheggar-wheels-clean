@@ -5,12 +5,15 @@
 // car owner. This mirrors Turo's split of "Turo fee" vs "host earnings".
 //
 // Accounting rule used everywhere on this page:
-//   renter pays     = subtotal − discountAmount + fee   (Booking.total)
-//   owner income    = subtotal − discountAmount          (released to owner)
-//   platform income = fee                                (kept by admin)
+//   renter pays     = subtotal − discountAmount + driverTotal + fee   (Booking.total)
+//   owner income    = subtotal − discountAmount + driverTotal          (released to owner —
+//                     the driver is the OWNER's, so the driver fee is owner income too)
+//   platform income = fee                                (kept by admin — 10% of the OVERALL
+//                     booking price including any owner-driver fee, FR-49)
 // Only bookings whose escrow was RELEASED (paymentStatus = PAID) count as income;
 // HELD money is still in escrow and is shown as its own KPI, never as income.
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB } from "@/lib/pricing";
@@ -39,7 +42,7 @@ export default async function AdminEarningsPage() {
   const [released, held] = await Promise.all([
     db.booking.findMany({
       where: { paymentStatus: PaymentStatus.PAID },
-      select: { subtotal: true, discountAmount: true, fee: true, endDate: true, owner: { select: { id: true, name: true } } },
+      select: { subtotal: true, discountAmount: true, driverTotal: true, fee: true, endDate: true, owner: { select: { id: true, name: true } } },
     }),
     db.booking.findMany({ where: { paymentStatus: PaymentStatus.HELD }, select: { total: true } }),
   ]);
@@ -61,7 +64,7 @@ export default async function AdminEarningsPage() {
   const thisMonth = monthKey(now);
 
   for (const b of released) {
-    const ownerShare = b.subtotal - b.discountAmount;
+    const ownerShare = b.subtotal - b.discountAmount + b.driverTotal;
     allPlatform += b.fee;
     allOwner += ownerShare;
     const key = monthKey(b.endDate); // income recognised in the month the trip ended
@@ -95,6 +98,7 @@ export default async function AdminEarningsPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-8">
+      <AutoRefresh />
       <header>
         <h1 className="text-2xl font-bold">Income dashboard</h1>
         <p className="text-sm text-muted-foreground">

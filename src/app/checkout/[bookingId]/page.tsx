@@ -52,6 +52,9 @@ export default async function CheckoutPage({ params }: { params: Promise<{ booki
                 <span>−{formatETB(booking.discountAmount)}</span>
               </p>
             )}
+            {booking.driverTotal > 0 && (
+              <p className="flex justify-between"><span>Owner&apos;s driver · {booking.days} day{booking.days > 1 ? "s" : ""} × {formatETB(booking.driverFeePerDay)}</span><span>{formatETB(booking.driverTotal)}</span></p>
+            )}
             <p className="flex justify-between text-muted-foreground"><span>Platform fee</span><span>{formatETB(booking.fee)}</span></p>
             <p className="flex justify-between border-t pt-1 text-base font-bold"><span>Total due now</span><span>{formatETB(booking.total)}</span></p>
             <p className="pt-1 text-xs text-muted-foreground">Snapshot taken when you requested the booking — it cannot change (BR-03, BR-04).</p>

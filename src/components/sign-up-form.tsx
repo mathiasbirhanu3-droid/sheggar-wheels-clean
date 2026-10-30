@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { passwordChecks, passwordStrength } from "@/lib/password-policy";
+import { DocPicker } from "@/components/doc-picker";
 import type { ActionState } from "@/lib/validation";
 
 // All 6 rules are mandatory on the server, so the label only says "Strong"
@@ -32,6 +33,7 @@ export function SignUpForm({ googleEnabled }: { googleEnabled?: boolean }) {
   const [state, formAction] = useActionState<ActionState, FormData>(signUpAction, {});
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [asOwner, setAsOwner] = useState(false); // FR-48: reveals the optional licence upload
   useEffect(() => { if (state.error) toast.error(state.error); }, [state]);
 
   const checks = passwordChecks(password);
@@ -108,12 +110,21 @@ export function SignUpForm({ googleEnabled }: { googleEnabled?: boolean }) {
       />
 
       <div className="flex items-start gap-2 rounded-lg border p-3">
-        <Checkbox id="asOwner" name="asOwner" className="mt-0.5" />
+        <Checkbox id="asOwner" name="asOwner" className="mt-0.5" checked={asOwner} onCheckedChange={(v) => setAsOwner(v === true)} />
         <div>
           <Label htmlFor="asOwner" className="font-normal">I also want to list my car</Label>
           <p className="text-xs text-muted-foreground">Adds the owner role to your account — one account can be both renter and owner (FR-04). Listings require admin approval.</p>
         </div>
       </div>
+
+      {/* FR-48: legal rental licence — OPTIONAL. Signup never blocks on it. */}
+      {asOwner && (
+        <DocPicker
+          name="rentalLicenseDoc"
+          label="Legal rental licence (business licence)"
+          description="If you already hold a rental / business licence, upload a photo or scan now. You can also skip this and add it later — your account works either way."
+        />
+      )}
       <SubmitButton className="w-full bg-brand text-brand-foreground hover:bg-brand/90">Create account</SubmitButton>
       <p className="text-xs text-muted-foreground">
         Your password is hashed with scrypt before storage — the plaintext is never saved or logged.

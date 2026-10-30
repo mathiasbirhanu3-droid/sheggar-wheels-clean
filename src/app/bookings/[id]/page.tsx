@@ -1,11 +1,12 @@
 // Booking detail (FR-28): lifecycle actions per user, receipt, review, dispute, simulated tracking.
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { canTransition } from "@/lib/bookings";
 import { formatETB, formatDate, formatDateTime } from "@/lib/pricing";
-import { BookingStatusBadge, PaymentStatusBadge, LicenseStatusBadge } from "@/components/status-badges";
+import { BookingStatusBadge, PaymentStatusBadge, LicenseStatusBadge, DriveModeBadge } from "@/components/status-badges";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
 import { CarImage } from "@/components/car-image";
@@ -44,6 +45,7 @@ export default async function BookingDetailPage({ params, searchParams }: { para
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <AutoRefresh />
       <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground"><Link href="/bookings" className="hover:text-foreground">My bookings</Link> <span aria-hidden>/</span> {booking.car.make} {booking.car.model}</nav>
 
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -54,6 +56,7 @@ export default async function BookingDetailPage({ params, searchParams }: { para
         <div className="flex flex-wrap items-center gap-2">
           <BookingStatusBadge status={status} />
           <PaymentStatusBadge status={booking.paymentStatus} />
+          <DriveModeBadge mode={booking.driveMode} />
         </div>
       </header>
 
@@ -94,10 +97,12 @@ export default async function BookingDetailPage({ params, searchParams }: { para
 
       <div className="grid gap-6 md:grid-cols-[1fr_320px]">
         <div className="space-y-6">
-          {/* Driving licence (FR-17 add-on): submitted with the request; the owner decided on it. */}
-          {(booking.licenseNumber || booking.licenseImage) && (
+          {/* Licence covering whoever drives (FR-49/50): SELF_DRIVE → the renter's
+              admin-approved profile licence; OWN_DRIVER → the brought driver's licence
+              (owner-decided); OWNER_DRIVER → none needed. */}
+          {booking.driveMode !== "OWNER_DRIVER" && (booking.licenseNumber || booking.licenseImage) && (
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><IdCard className="h-4 w-4 text-brand" aria-hidden /> Driving licence</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><IdCard className="h-4 w-4 text-brand" aria-hidden /> {booking.driveMode === "OWN_DRIVER" ? "Driver's licence" : "Renter's driving licence"}</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="flex flex-wrap items-center gap-3">
                   {booking.licenseImage && (
@@ -108,12 +113,24 @@ export default async function BookingDetailPage({ params, searchParams }: { para
                   )}
                   <div className="space-y-1">
                     <p><span className="text-muted-foreground">Number:</span> <span className="font-mono font-medium">{booking.licenseNumber ?? "—"}</span></p>
-                    <p className="text-xs text-muted-foreground">Submitted by {booking.renter.name} with the rental request.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {booking.driveMode === "OWN_DRIVER"
+                        ? `For ${booking.driverName ?? "the driver"} — brought by ${booking.renter.name} with the request.`
+                        : `Verified by the platform admin before the request (${booking.renter.name}).`}
+                    </p>
                     <LicenseStatusBadge status={booking.licenseStatus} />
                     {booking.licenseDecisionNote && <p className="text-xs text-muted-foreground">Owner&apos;s note: {booking.licenseDecisionNote}</p>}
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">Private to the renter, the car owner, and platform admins.</p>
+              </CardContent>
+            </Card>
+          )}
+          {booking.driveMode === "OWNER_DRIVER" && (
+            <Card>
+              <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
+                <IdCard className="h-4 w-4 text-brand" aria-hidden />
+                Driven by the owner&apos;s professional driver — no licence review needed.
               </CardContent>
             </Card>
           )}
@@ -226,6 +243,9 @@ export default async function BookingDetailPage({ params, searchParams }: { para
                   </span>
                   <span>−{formatETB(booking.discountAmount)}</span>
                 </p>
+              )}
+              {booking.driverTotal > 0 && (
+                <p className="flex justify-between"><span>Owner&apos;s driver · {booking.days} day{booking.days > 1 ? "s" : ""} × {formatETB(booking.driverFeePerDay)}</span><span>{formatETB(booking.driverTotal)}</span></p>
               )}
               <p className="flex justify-between text-muted-foreground"><span>Platform fee</span><span>{formatETB(booking.fee)}</span></p>
               <p className="flex justify-between text-base font-bold"><span>Total (snapshot)</span><span>{formatETB(booking.total)}</span></p>

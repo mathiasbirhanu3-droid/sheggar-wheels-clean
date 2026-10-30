@@ -1,5 +1,6 @@
 // Renter bookings (FR-26..28): history with status/date filters, CSV export, next trip.
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB, formatDate } from "@/lib/pricing";
@@ -41,6 +42,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <AutoRefresh />
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">My bookings</h1>

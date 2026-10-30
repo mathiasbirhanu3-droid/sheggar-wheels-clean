@@ -56,6 +56,11 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
 
   if (!isPublic && !isOwner) notFound();
 
+  // FR-50: the signed-in renter's profile licence status drives the self-drive gate.
+  const licenseStatus = user
+    ? (await db.user.findUnique({ where: { id: user.id }, select: { drivingLicenseStatus: true } }))?.drivingLicenseStatus ?? "NONE"
+    : "NONE";
+
   const ratings = car.reviews.map((r) => r.rating);
   const avg = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null;
   // Live offer for this exact car — 0 when none. Drives the badge + the form's discount line.
@@ -125,6 +130,9 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
               <Badge variant="secondary" className="gap-1"><Users className="h-3 w-3" /> {car.seats} seats</Badge>
               <Badge variant="secondary" className="gap-1"><Gauge className="h-3 w-3" /> {car.transmission.toLowerCase()}</Badge>
               <Badge variant="secondary" className="gap-1"><Fuel className="h-3 w-3" /> {FUEL_LABEL[car.fuelType]}</Badge>
+              {car.driverFeePerDay != null && car.driverFeePerDay > 0 && (
+                <Badge variant="secondary" className="gap-1"><Users className="h-3 w-3" /> Driver available · +{formatETB(car.driverFeePerDay)}/day</Badge>
+              )}
               {discountPercent > 0 ? (
                 <Badge className="gap-1 bg-brand text-brand-foreground hover:bg-brand">−{discountPercent}% live offer</Badge>
               ) : (
@@ -220,6 +228,8 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
                 signedIn={!!user}
                 suspended={user?.status === "SUSPENDED"}
                 discountPercent={discountPercent}
+                driverFeePerDay={car.driverFeePerDay}
+                licenseStatus={licenseStatus}
               />
             </CardContent>
           </Card>

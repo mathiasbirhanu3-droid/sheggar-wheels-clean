@@ -2,11 +2,12 @@
 // (BR-05), advance lifecycle. The licence decision is part of the owner's approve/decline.
 import Link from "next/link";
 import Image from "next/image";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB, formatDate, formatDateTime } from "@/lib/pricing";
-import { BookingStatusBadge, PaymentStatusBadge, LicenseStatusBadge } from "@/components/status-badges";
+import { BookingStatusBadge, PaymentStatusBadge, LicenseStatusBadge, DriveModeBadge } from "@/components/status-badges";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
 import { approveBookingAction, declineBookingAction, startTripAction, completeTripAction } from "@/actions/bookings";
@@ -31,6 +32,7 @@ export default async function CarBookingsPage({ params }: { params: Promise<{ id
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 px-4 py-8">
+      <AutoRefresh />
       <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground"><Link href="/owner/cars" className="hover:text-foreground">My listings</Link> <span aria-hidden>/</span> {car.make} {car.model} bookings</nav>
       <h1 className="text-2xl font-bold">Requests and bookings <span className="text-base font-normal text-muted-foreground">({bookings.length})</span></h1>
 
@@ -50,14 +52,21 @@ export default async function CarBookingsPage({ params }: { params: Promise<{ id
                     <div className="flex flex-wrap items-center gap-2">
                       <BookingStatusBadge status={b.status} />
                       <PaymentStatusBadge status={b.paymentStatus} />
+                      <DriveModeBadge mode={b.driveMode} />
                       <p className="font-bold">{formatETB(b.total)}</p>
                     </div>
                   </div>
 
-                  {/* Driving licence submitted with the request — review before approving. */}
-                  <div className="rounded-lg border bg-muted/30 p-3">
-                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><IdCard className="h-4 w-4 text-brand" aria-hidden /> Driving licence</p>
-                    {b.licenseNumber || b.licenseImage ? (
+                  {b.driveMode === "OWN_DRIVER" && b.driverName && (
+                    <p className="text-sm"><span className="text-muted-foreground">Driver:</span> <span className="font-medium">{b.driverName}</span></p>
+                  )}
+
+                  {/* Licence covering whoever drives (FR-49): OWN_DRIVER → the owner reviews
+                      the brought driver's licence; SELF_DRIVE → already admin-approved;
+                      OWNER_DRIVER → none needed. */}
+                  {b.driveMode !== "OWNER_DRIVER" && (b.licenseNumber || b.licenseImage) && (
+                    <div className="rounded-lg border bg-muted/30 p-3">
+                      <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><IdCard className="h-4 w-4 text-brand" aria-hidden /> {b.driveMode === "OWN_DRIVER" ? "Driver's licence" : "Renter's driving licence"}</p>
                       <div className="flex flex-wrap items-center gap-3">
                         {b.licenseImage ? (
                           <a href={b.licenseImage} target="_blank" rel="noopener noreferrer" title="Open the licence photo full size" className="shrink-0">
@@ -69,14 +78,16 @@ export default async function CarBookingsPage({ params }: { params: Promise<{ id
                         <div className="min-w-0 space-y-1 text-sm">
                           <p><span className="text-muted-foreground">Number:</span> <span className="font-mono font-medium">{b.licenseNumber ?? "—"}</span></p>
                           <LicenseStatusBadge status={b.licenseStatus} />
-                          {b.licenseStatus === "PENDING" && b.status === "REQUESTED" && <p className="text-xs text-muted-foreground">Check the photo and number, then approve or decline below.</p>}
+                          {b.driveMode === "SELF_DRIVE" && <p className="text-xs text-muted-foreground">Already verified by the platform admin — no licence review needed from you.</p>}
+                          {b.driveMode === "OWN_DRIVER" && b.licenseStatus === "PENDING" && b.status === "REQUESTED" && <p className="text-xs text-muted-foreground">Check the photo and number, then approve or decline below.</p>}
                           {b.licenseDecisionNote && <p className="text-xs text-muted-foreground">Decision note: {b.licenseDecisionNote}</p>}
                         </div>
                       </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">No licence on file (older request created before this feature).</p>
-                    )}
-                  </div>
+                    </div>
+                  )}
+                  {b.driveMode === "OWNER_DRIVER" && (
+                    <p className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">Driven by your professional driver — no licence review needed. Driver fee snapshot: {formatETB(b.driverFeePerDay)}/day.</p>
+                  )}
 
                   <div className="flex flex-wrap gap-2">
                     {canTransition(b.status, BookingStatus.CONFIRMED) && (

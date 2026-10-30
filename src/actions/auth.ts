@@ -65,6 +65,7 @@ export async function signUpAction(_prev: ActionState, formData: FormData): Prom
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
     asOwner: formData.get("asOwner") === "on",
+    rentalLicenseDoc: String(formData.get("rentalLicenseDoc") ?? ""), // FR-48: optional
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   const email = parsed.data.email.toLowerCase().trim();
@@ -81,6 +82,7 @@ export async function signUpAction(_prev: ActionState, formData: FormData): Prom
       phone: parsed.data.phone || null,
       passwordHash,
       roles: parsed.data.asOwner ? [Role.OWNER, Role.RENTER] : [Role.RENTER],
+      rentalLicenseDoc: parsed.data.rentalLicenseDoc || null, // FR-48: stored when the owner volunteered it
     },
   });
   await createSession(user.id);

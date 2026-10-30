@@ -20,9 +20,10 @@ export default async function OwnerEarningsPage() {
     orderBy: { startDate: "asc" },
   });
 
-  // Owner income = the rental amount only (subtotal − discount). The 10% service
-  // fee (BR-04) is platform income and belongs to the admin — never to the owner.
-  const ownerShare = (b: { subtotal: number; discountAmount: number }) => b.subtotal - b.discountAmount;
+  // Owner income = the rental amount including any owner-driver fee (subtotal − discount
+  // + driverTotal — the driver is the owner's, so the fee is owner income). The 10%
+  // service fee on the OVERALL price (FR-49) is platform income, never the owner's.
+  const ownerShare = (b: { subtotal: number; discountAmount: number; driverTotal: number }) => b.subtotal - b.discountAmount + b.driverTotal;
 
   const monthly = new Map<string, number>();
   for (const b of bookings) {

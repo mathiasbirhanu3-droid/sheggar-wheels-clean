@@ -78,12 +78,15 @@ export async function getActiveDiscountMap(carIds: string[]): Promise<Map<string
   return map;
 }
 
-/** Full request-time validation for a new booking on an approved+active car. */
-export async function validateNewBooking(carId: string, start: Date, end: Date, excludeId?: string) {
+/** Full request-time validation for a new booking on an approved+active car.
+ *  driverFeePerDay: the EFFECTIVE owner-driver fee for this request (FR-49) —
+ *  non-zero only when the renter chose OWNER_DRIVER mode; it flows into the
+ *  snapshot maths so the 10% fee covers the overall booking price. */
+export async function validateNewBooking(carId: string, start: Date, end: Date, excludeId?: string, driverFeePerDay = 0) {
   const car = await db.car.findUnique({ where: { id: carId } });
   if (!car || car.status !== "APPROVED") return { error: "This car is not available for booking." as const };
   const discountPercent = await getActiveCarDiscount(carId);
-  const totals = computeTotals(car.pricePerDay, start, end, discountPercent);
+  const totals = computeTotals(car.pricePerDay, start, end, discountPercent, driverFeePerDay);
   if (!totals) return { error: "The selected dates are not a valid range." as const };
   const future = new Date(toISODate(new Date()) + "T00:00:00.000Z");
   if (end.getTime() < future.getTime()) return { error: "The return date cannot be in the past." as const };

@@ -4,13 +4,13 @@ import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB } from "@/lib/pricing";
 import { Card, CardContent } from "@/components/ui/card";
-import { CarFront, ClipboardList, Users, Scale, Wallet, PiggyBank } from "lucide-react";
+import { CarFront, ClipboardList, Users, Scale, Wallet, PiggyBank, IdCard } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Admin" };
 
 export default async function AdminPage() {
-  const [pendingCars, totalCars, users, openDisputes, bookings, gmvRows, heldRows, paidRows] = await Promise.all([
+  const [pendingCars, totalCars, users, openDisputes, bookings, gmvRows, heldRows, paidRows, pendingLicenses] = await Promise.all([
     db.car.count({ where: { status: "PENDING" } }),
     db.car.count(),
     db.user.count(),
@@ -19,6 +19,7 @@ export default async function AdminPage() {
     db.booking.findMany({ where: { status: { in: ["COMPLETED", "REVIEWED", "RESOLVED"] } }, select: { total: true } }),
     db.booking.findMany({ where: { paymentStatus: "HELD" }, select: { total: true } }),
     db.booking.findMany({ where: { paymentStatus: "PAID" }, select: { fee: true } }),
+    db.user.count({ where: { drivingLicenseStatus: "PENDING" } }),
   ]);
   const gmv = gmvRows.reduce((a, b) => a + b.total, 0);
   const heldTotal = heldRows.reduce((a, b) => a + b.total, 0);
@@ -31,6 +32,7 @@ export default async function AdminPage() {
     { href: "/admin/bookings", icon: ClipboardList, label: "All bookings", value: bookings, hint: formatETB(gmv) + " completed GMV" },
     { href: "/admin/earnings", icon: PiggyBank, label: "Income dashboard", value: formatETB(platformIncome), hint: "platform fees vs owner payouts, by month" },
     { href: "/admin/bookings?payment=held", icon: Wallet, label: "Payments held in escrow", value: heldRows.length, hint: formatETB(heldTotal) + " awaiting release" },
+    { href: "/admin/licenses", icon: IdCard, label: "Driving licences to review", value: pendingLicenses, hint: "approving unlocks self-drive" },
     { href: "/admin/disputes", icon: Scale, label: "Open disputes", value: openDisputes, hint: "resolve with notes" },
   ];
 

@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { BookingStatus, PaymentStatus, CarStatus, LicenseStatus } from "@prisma/client";
+import type { BookingStatus, PaymentStatus, CarStatus, LicenseStatus, DriveMode, DrivingLicenseStatus } from "@prisma/client";
 
 const BOOKING_STYLES: Record<BookingStatus, string> = {
   REQUESTED: "bg-amber-100 text-amber-800 hover:bg-amber-100",
@@ -62,4 +62,37 @@ export function LicenseStatusBadge({ status }: { status: LicenseStatus }) {
   };
   const key = String(status);
   return <Badge className={styles[key] ?? "bg-stone-200 text-stone-600 hover:bg-stone-200"} variant="secondary">{labels[key] ?? key.toLowerCase()}</Badge>;
+}
+
+// FR-49: how the trip will be driven — shown on booking lists and the detail page.
+export function DriveModeBadge({ mode }: { mode: DriveMode }) {
+  const styles: Record<DriveMode, string> = {
+    SELF_DRIVE: "bg-sky-100 text-sky-800 hover:bg-sky-100",
+    OWN_DRIVER: "bg-violet-100 text-violet-800 hover:bg-violet-100",
+    OWNER_DRIVER: "bg-amber-100 text-amber-800 hover:bg-amber-100",
+  };
+  const labels: Record<DriveMode, string> = {
+    SELF_DRIVE: "self-drive",
+    OWN_DRIVER: "own driver",
+    OWNER_DRIVER: "owner's driver",
+  };
+  return <Badge className={styles[mode]} variant="secondary">{labels[mode]}</Badge>;
+}
+
+// FR-50: the renter's PROFILE licence status (admin-decided, unlocks self-drive).
+// Distinct from the per-booking LicenseStatusBadge above (owner-decided).
+export function DrivingLicenseStatusBadge({ status }: { status: DrivingLicenseStatus }) {
+  const styles: Record<DrivingLicenseStatus, string> = {
+    NONE: "bg-stone-200 text-stone-600 hover:bg-stone-200",
+    PENDING: "bg-amber-100 text-amber-800 hover:bg-amber-100",
+    APPROVED: "bg-emerald-100 text-emerald-800 hover:bg-emerald-100",
+    REJECTED: "bg-red-100 text-red-800 hover:bg-red-100",
+  };
+  const labels: Record<DrivingLicenseStatus, string> = {
+    NONE: "not submitted",
+    PENDING: "pending admin review",
+    APPROVED: "approved by admin",
+    REJECTED: "rejected — re-upload",
+  };
+  return <Badge className={styles[status]} variant="secondary">{labels[status]}</Badge>;
 }

@@ -34,11 +34,16 @@ export async function createCarAction(_prev: ActionState, formData: FormData): P
   const rl = rateLimit(await scopedKey("car-create"), 5, 60_000); // 5 listings / min / IP (spam guard)
   if (!rl.ok) return { error: `Too many listing attempts — try again in ${rl.retryAfterSec}s.` };
   const photos = formData.getAll("photos").map(String).filter(Boolean);
+  const valuationAmountRaw = String(formData.get("valuationAmount") ?? "").trim();
+  const driverFeeRaw = String(formData.get("driverFeePerDay") ?? "").trim(); // FR-49: optional owner-driver fee
   const parsed = carSchema.safeParse({
     make: formData.get("make"), model: formData.get("model"), year: formData.get("year"),
     transmission: formData.get("transmission"), fuelType: formData.get("fuelType") || "PETROL", seats: formData.get("seats"),
     city: formData.get("city") || "Addis Ababa", neighbourhood: formData.get("neighbourhood"),
     pricePerDay: formData.get("pricePerDay"), description: formData.get("description"), photos,
+    valuationDoc: formData.get("valuationDoc"),
+    ...(valuationAmountRaw ? { valuationAmount: valuationAmountRaw } : {}),
+    ...(driverFeeRaw ? { driverFeePerDay: driverFeeRaw } : {}),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   const car = await db.car.create({
@@ -61,14 +66,21 @@ export async function updateCarAction(_prev: ActionState, formData: FormData): P
   const car = await ownCar(carId, user.id);
   if (!car) return { error: "You can only edit your own listings (NT-04)." };
   const photos = formData.getAll("photos").map(String).filter(Boolean);
+  const valuationAmountRaw = String(formData.get("valuationAmount") ?? "").trim();
+  const driverFeeRaw = String(formData.get("driverFeePerDay") ?? "").trim(); // FR-49: optional owner-driver fee
   const parsed = carSchema.safeParse({
     make: formData.get("make"), model: formData.get("model"), year: formData.get("year"),
     transmission: formData.get("transmission"), fuelType: formData.get("fuelType") || "PETROL", seats: formData.get("seats"),
     city: formData.get("city") || "Addis Ababa", neighbourhood: formData.get("neighbourhood"),
     pricePerDay: formData.get("pricePerDay"), description: formData.get("description"), photos,
+    valuationDoc: formData.get("valuationDoc"),
+    ...(valuationAmountRaw ? { valuationAmount: valuationAmountRaw } : {}),
+    ...(driverFeeRaw ? { driverFeePerDay: driverFeeRaw } : {}),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  await db.car.update({ where: { id: carId }, data: parsed.data });
+  // An emptied driver-fee field REMOVES the owner-driver option (BR-03: existing
+  // bookings keep their frozen driver snapshot).
+  await db.car.update({ where: { id: carId }, data: { ...parsed.data, driverFeePerDay: parsed.data.driverFeePerDay ?? null } });
   refresh(carId);
   return { ok: true, message: "Listing updated. Existing bookings keep their original prices (BR-03)." };
 }

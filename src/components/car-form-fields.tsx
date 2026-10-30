@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PhotoPicker } from "@/components/photo-picker";
+import { DocPicker } from "@/components/doc-picker";
 import type { Car } from "@prisma/client";
 
 export function CarFormFields({ car }: { car?: Car }) {
@@ -50,6 +51,13 @@ export function CarFormFields({ car }: { car?: Car }) {
           <Label htmlFor="pricePerDay">Price per day (ETB)</Label>
           <Input id="pricePerDay" name="pricePerDay" type="number" min={500} step={100} required defaultValue={car?.pricePerDay} placeholder="3000" />
         </div>
+        {/* FR-49: optional owner-provided professional driver. Empty = renters must
+            drive themselves (with an admin-approved licence) or bring their own driver. */}
+        <div className="space-y-1.5">
+          <Label htmlFor="driverFeePerDay">Offer a driver? (ETB/day, optional)</Label>
+          <Input id="driverFeePerDay" name="driverFeePerDay" type="number" min={100} step={50} defaultValue={car?.driverFeePerDay ?? undefined} placeholder="e.g. 800" />
+          <p className="text-xs text-muted-foreground">Your professional driver joins the trip for this daily fee — renters pick it at booking and it&apos;s added to their total. Leave empty if you don&apos;t offer a driver.</p>
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="city">City</Label>
           <Input id="city" name="city" required defaultValue={car?.city ?? "Addis Ababa"} readOnly aria-describedby="city-hint" />
@@ -65,6 +73,28 @@ export function CarFormFields({ car }: { car?: Car }) {
         <Textarea id="description" name="description" rows={4} required minLength={20} defaultValue={car?.description} placeholder="Condition, fuel economy, rules, pickup spot…" />
       </div>
       <PhotoPicker initial={car?.photos ?? []} />
+      {/* FR-47: technical valuation — REQUIRED with every listing. The admin
+          checks this document on /admin/listings before approving (BR-02). */}
+      <DocPicker
+        name="valuationDoc"
+        label="Technical valuation report"
+        description="Upload a photo or scan of the technical inspection / valuation report for this car (from an inspection center or a licensed valuer). The admin reviews it before the listing goes public."
+        required
+        initial={car?.valuationDoc ?? null}
+      />
+      <div className="space-y-1.5 sm:w-1/2">
+        <Label htmlFor="valuationAmount">Declared market value in ETB (optional)</Label>
+        <Input
+          id="valuationAmount"
+          name="valuationAmount"
+          type="number"
+          min={0}
+          step={1000}
+          defaultValue={car?.valuationAmount ?? undefined}
+          placeholder="450000"
+        />
+        <p className="text-xs text-muted-foreground">The value stated in the valuation report — shown to the admin during approval.</p>
+      </div>
     </div>
   );
 }

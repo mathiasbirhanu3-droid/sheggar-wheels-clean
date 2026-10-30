@@ -1,5 +1,6 @@
 // All bookings view (FR-42): filters by status and date.
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { db } from "@/lib/db";
 import { requireActiveUser } from "@/lib/auth";
 import { formatETB, formatDate } from "@/lib/pricing";
@@ -30,6 +31,7 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-8">
+      <AutoRefresh />
       <h1 className="text-2xl font-bold">All bookings <span className="text-base font-normal text-muted-foreground">({bookings.length})</span></h1>
       {sp.payment === "held" && <p className="text-sm text-muted-foreground">Showing only bookings whose payment is held in escrow.</p>}
 
