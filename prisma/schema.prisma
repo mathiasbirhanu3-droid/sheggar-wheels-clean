@@ -73,6 +73,24 @@ enum LicenseStatus {
   REJECTED
 }
 
+// FR-49: how the trip will be driven — chosen by the renter at request time.
+enum DriveMode {
+  SELF_DRIVE   // renter drives — requires the ADMIN-approved licence on their profile
+  OWN_DRIVER   // renter brings their own driver — the driver's licence is attached to the request
+  OWNER_DRIVER // the owner's professional driver comes with the car (extra fee/day set on the listing)
+}
+
+// FR-50: renter's own driving licence, reviewed once by the ADMIN on /profile.
+// Kept separate from the per-booking LicenseStatus (owner-decided) on purpose:
+// the profile licence unlocks SELF_DRIVE across every car; the booking licence
+// covers whoever actually drives this particular trip.
+enum DrivingLicenseStatus {
+  NONE     // never submitted
+  PENDING  // waiting for admin review
+  APPROVED // admin approved — self-drive unlocked platform-wide
+  REJECTED // admin rejected — renter can re-upload
+}
+
 enum DisputeStatus {
   OPEN
   RESOLVED
@@ -94,6 +112,16 @@ model User {
   passwordHash String?
   roles     Role[] // FR-04: one account can be renter and owner
   status    UserStatus @default(ACTIVE) // FR-06 / BR-10
+  // FR-48: OPTIONAL legal rental licence uploaded at owner registration.
+  // Nullable by design — owners may add it later; it is never blocking.
+  rentalLicenseDoc String?
+  // FR-50: the renter's own driving licence — uploaded once on /profile and
+  // approved by an ADMIN. Nullable columns + NONE default so existing rows
+  // survive `prisma db push` without a backfill.
+  drivingLicenseNumber String?
+  drivingLicenseDoc    String? // data URL (resized in browser) or https link
+  drivingLicenseStatus DrivingLicenseStatus @default(NONE)
+  drivingLicenseNote   String? // admin note when rejecting
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -124,6 +152,15 @@ model Car {
   pricePerDay     Int // ETB, positive (FR-32)
   description     String
   photos          String[] // FR-34
+  // FR-47: technical valuation submitted with the listing. The column is
+  // nullable so existing rows survive `prisma db push` — the FORM and the
+  // zod schema make it required for every new/edited listing.
+  valuationDoc    String? // scanned technical valuation / inspection report (data URL)
+  valuationAmount Int? // owner-declared market value in ETB (optional)
+  // FR-49: OPTIONAL professional driver offered BY THE OWNER with this car.
+  // Null/absent = the car cannot be booked in OWNER_DRIVER mode; when set,
+  // the daily fee is added to the booking total and shares the 10% platform fee.
+  driverFeePerDay Int?
   status          CarStatus    @default(PENDING) // BR-02: only APPROVED is public
   unavailableDates DateTime[]  @default([]) // FR-35 / BR-05
   createdAt       DateTime     @default(now())
@@ -160,10 +197,18 @@ model Booking {
   paymentMethod  String? // "TeleBirr" | "CBE Birr" | "M-Pesa" | "Chapa" — frozen at pay time (BR-03 spirit)
   // Driving licence submitted WITH the rental request (owner reviews in dashboard).
   // Nullable in DB so pre-feature rows and admin seeds stay valid; zod requires it for new requests.
-  licenseNumber       String?       // licence number typed by the renter
+  // FR-49 semantics by mode: SELF_DRIVE → the renter's ADMIN-approved profile licence
+  // (status starts APPROVED); OWN_DRIVER → the brought driver's licence (PENDING, owner
+  // reviews); OWNER_DRIVER → no licence needed (the owner vouches for their own driver).
+  licenseNumber       String?       // licence number of whoever drives
   licenseImage        String?       // data URL (resized in browser) or https link
   licenseStatus       LicenseStatus @default(PENDING)
   licenseDecisionNote String?       // optional owner note when rejecting
+  // FR-49: drive-mode snapshot (BR-03 spirit) — frozen with the price.
+  driveMode      DriveMode @default(SELF_DRIVE)
+  driverName     String?   // OWN_DRIVER only: full name of the driver the renter brings
+  driverFeePerDay Int     @default(0) // snapshot: owner-driver fee/day (0 unless OWNER_DRIVER)
+  driverTotal    Int       @default(0) // snapshot: driverFeePerDay × days
   statusBeforeDispute BookingStatus?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
