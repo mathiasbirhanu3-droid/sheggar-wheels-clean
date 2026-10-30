@@ -28,7 +28,7 @@ export function MapView({ lat, lng, label }: { lat: number; lng: number; label: 
 
   return (
     <div>
-      <div ref={ref} className="h-56 w-full overflow-hidden rounded-lg border bg-muted" role="img" aria-label={`Sample location map: ${label}`} />
+      <div ref={ref} className="relative z-0 h-56 w-full overflow-hidden rounded-lg border bg-muted" role="img" aria-label={`Sample location map: ${label}`} />
       <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
         <MapPin className="h-3.5 w-3.5" /> Approximate neighbourhood location (seeded sample, not live GPS).
       </p>

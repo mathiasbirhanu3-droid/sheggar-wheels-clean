@@ -1,19 +1,6 @@
 "use client";
-// ── FR-46 · NOTIFICATION BELL — v3, complete rewrite ─────────────────────
 //
-// REQUIREMENT (what this component does):
-//   1. The red badge shows ONLY unseen notifications (read = false).
-//   2. OPENING the bell = the user has seen the list: the number vanishes
-//      instantly on screen AND read = true is saved in the database, so it
-//      stays gone after reload and on every other device.
-//   3. The dropdown always lists the 8 newest notifications ("View all"
-//      opens the full /notifications page).
-//
-// It is fully SELF-CONTAINED. It talks only to two API routes:
-//   GET  /api/notifications/summary  -> { unread: number, recent: Recent[] }
-//   POST /api/notifications/read-all -> marks every unseen row as seen
-// No server actions, no context, no other components are involved.
-// ─────────────────────────────────────────────────────────────────────────
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
@@ -25,6 +12,7 @@ type Recent = { id: string; title: string; body: string; link: string | null; re
 export function NotificationBell() {
   const [unseen, setUnseen] = useState(0); // ← the badge number
   const [recent, setRecent] = useState<Recent[]>([]); // ← the dropdown list
+  const [open, setOpen] = useState(false); // ← panel visibility (controlled)
   const busy = useRef(false); // guard: never fire mark-all twice at once
 
   // Load badge count + list. Silent on any failure — the bell must never
@@ -79,7 +67,7 @@ export function NotificationBell() {
   }, [loadSummary]);
 
   return (
-    <Popover onOpenChange={(open) => { if (open) void markAllSeen(); }}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) void markAllSeen(); }}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative" aria-label={`Notifications, ${unseen} unseen`}>
           <Bell className="h-5 w-5" />
@@ -97,7 +85,7 @@ export function NotificationBell() {
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">No notifications yet.</p>
           )}
           {recent.map((n) => (
-            <Link key={n.id} href={n.link ?? "/notifications"} className="block border-b px-3 py-2.5 text-sm last:border-0 hover:bg-muted/50">
+            <Link key={n.id} href={n.link ?? "/notifications"} onClick={() => setOpen(false)} className="block border-b px-3 py-2.5 text-sm last:border-0 hover:bg-muted/50">
               <p className="flex items-center gap-2 font-medium">
                 {!n.read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-label="unseen" />}
                 {n.title}
@@ -108,7 +96,7 @@ export function NotificationBell() {
         </div>
         <div className="border-t p-2">
           <Button asChild variant="ghost" size="sm" className="w-full">
-            <Link href="/notifications">View all</Link>
+            <Link href="/notifications" onClick={() => setOpen(false)}>View all</Link>
           </Button>
         </div>
       </PopoverContent>
